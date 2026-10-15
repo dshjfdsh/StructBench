@@ -1,0 +1,1259 @@
+version: 1
+category: escape_hell
+description: >
+  Escape Hell probes whether a model can carry hard, byte-exact content inside the
+  string values of a JSON document: multi-line source code, SQL with doubled
+  apostrophes and quoted identifiers, regular expressions full of backslashes,
+  LaTeX, Markdown tables, nested double quotes, Windows paths, JSON serialised
+  inside a JSON string, heredocs, base64/JWT/PEM blobs and Unicode oddities such
+  as decomposed accents, ZWJ emoji, RTL text and zero-width characters. The
+  failure is rarely a wrong answer; it is a broken serialisation. One unescaped
+  inner double quote, one raw newline, one swallowed backslash or one normalised
+  Unicode sequence either makes json.loads() throw or silently hands the caller
+  different bytes than it asked for. Every case pins the expected content with
+  must_contain / must_match / must_equal so the verdict is deterministic.
+cases:
+  # ------------------------------------------------------------------ esc_001 --
+  - id: esc_001
+    title: SQL review payload with doubled apostrophes and quoted identifier
+    tags: [escape, sql, quotes]
+    difficulty: 4
+    system: |
+      You are a JSON-only code-review service. Reply with a single raw JSON object
+      and nothing else: no Markdown fence, no preamble, no trailing commentary.
+    prompt: |
+      Review this Postgres statement for the nightly user-export job:
+
+      SELECT u.id, u.email FROM users u WHERE u.note = 'it''s fine' AND u.status = "active" ORDER BY u.created_at DESC;
+
+      Return a JSON object with:
+      - "query": the statement copied byte for byte into one string. Keep the
+        doubled apostrophe in 'it''s fine' exactly as written, and keep the
+        double-quoted "active" identifier exactly as written.
+      - "dialect": exactly "postgres".
+      - "risk_score": an integer from 1 to 10 rating how risky the statement is.
+      - "notes": one sentence explaining that "active" is an identifier and not a
+        string literal.
+      - "smoke_test_sql": the one-row probe we always run before the real
+        statement, which is exactly SELECT 1 — no trailing semicolon and no extra
+        whitespace.
+
+      Do not use SELECT * anywhere in "query"; it must be the statement above.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+          minLength: 40
+        dialect:
+          type: string
+          enum: ["postgres"]
+        risk_score:
+          type: integer
+          minimum: 1
+          maximum: 10
+        notes:
+          type: string
+          minLength: 10
+        smoke_test_sql:
+          type: string
+          minLength: 8
+      required: [query, dialect, risk_score, notes, smoke_test_sql]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.query": "WHERE u.note = 'it''s fine' AND u.status = \"active\""
+      must_match:
+        "$.smoke_test_sql": "SELECT 1"
+      must_not_contain:
+        "$.query": "SELECT *"
+    max_rounds: 2
+    notes: |
+      中文说明：这题的陷阱是同一个字符串里同时出现"两个单引号转义"和"双引号标识符"。模型常见的
+      三种崩法：(a) 把内部的 "active" 直接裸写进 JSON 字符串，导致 json.loads() 在 "active"
+      处截断字符串；(b) 自作聪明把 'it''s fine' 规范化成 'it\'s fine'；(c) 把双引号悄悄换成单
+      引号以"避免转义"。must_contain 用 SQL 中间那段（含 \"active\" 与 it''s fine）做逐字校验，
+      must_not_contain 则挡住模型改用 SELECT * 偷懒。
+  # ------------------------------------------------------------------ esc_002 --
+  - id: esc_002
+    title: Multi-line Python snippet with triple quotes and an f-string
+    tags: [escape, code, python, newline]
+    difficulty: 4
+    system: |
+      Reply with one raw JSON object only. No Markdown fence, no commentary.
+    prompt: |
+      File a bug report for the ingestion job. The reporter attached this
+      reproduction snippet:
+
+      def normalize(name: str) -> str:
+          """Return the canonical key."""
+          parts = [p.strip() for p in name.split(",")]
+          return {"key": "-".join(parts), "raw": f'{name!r}'}
+
+      Return JSON with:
+      - "snippet": the whole snippet as ONE string, four-space indentation and
+        line breaks preserved (escape newlines, do not collapse the function onto
+        one line). Store it as plain text: no ``` fence inside the string.
+      - "docstring": just the docstring line, triple quotes included.
+      - "language": exactly "python".
+      - "line_count": integer, how many lines the snippet has.
+      - "has_side_effects": false.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        snippet:
+          type: string
+          minLength: 40
+        docstring:
+          type: string
+          minLength: 5
+        language:
+          type: string
+          const: "python"
+        line_count:
+          type: integer
+          minimum: 1
+        has_side_effects:
+          type: boolean
+      required: [snippet, docstring, language, line_count, has_side_effects]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.snippet": "return {\"key\": \"-\".join(parts), \"raw\": f'{name!r}'}"
+        "$.docstring": "\"\"\"Return the canonical key.\"\"\""
+      must_not_contain:
+        "$.snippet": "```"
+    max_rounds: 2
+    notes: |
+      中文说明：一段代码里同时有 """三引号"""、字典字面量的双引号、f-string 里的单引号和
+      {name!r} 花括号。模型必须在 JSON 字符串里把每个 " 写成 \"、每个换行写成 \n，同时不能把
+      f-string 的 {name!r} 展开或破坏缩进。must_contain 抓的是字典返回那一整行（双引号与花括号
+      最密集处），must_not_contain 则抓住"顺手给代码块加 ``` 围栏"的经典泄漏。
+  # ------------------------------------------------------------------ esc_003 --
+  - id: esc_003
+    title: JavaScript template literal with ${} interpolation
+    tags: [escape, code, javascript, dollar-brace]
+    difficulty: 3
+    prompt: |
+      Add this line to the data dictionary for the release script:
+
+      const label = `${project}/${branch}@${process.env.GIT_SHA ?? "dev"}`;
+
+      Return JSON with:
+      - "snippet": the line verbatim, backticks and all four ${...} interpolations
+        kept, including the double-quoted "dev" fallback.
+      - "runtime": exactly "node".
+      - "es_version": integer, the ECMAScript year the ?? operator was standardised
+        in (any plausible year between 2015 and 2025).
+      - "uses_optional_coalescing": true.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        snippet:
+          type: string
+          minLength: 20
+        runtime:
+          type: string
+          const: "node"
+        es_version:
+          type: integer
+          minimum: 2015
+          maximum: 2025
+        uses_optional_coalescing:
+          type: boolean
+      required: [snippet, runtime, es_version, uses_optional_coalescing]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.snippet": "`${project}/${branch}@${process.env.GIT_SHA ?? \"dev\"}`"
+      must_equal:
+        "$.uses_optional_coalescing": true
+    max_rounds: 2
+    notes: |
+      中文说明：模板字符串里的 ${...} 对"喜欢做字符串插值"的模型和评测框架都是双刃剑——模型
+      有时会把 ${project} 当成待填占位符替换成假值，有时会把反引号改成普通引号。must_contain
+      钉住整段右值（含 ?? "dev" 里的双引号），确认模型保留了原样文本而不是"帮忙渲染"。
+  # ------------------------------------------------------------------ esc_004 --
+  - id: esc_004
+    title: Rust snippet with generics-free slice type and println macro
+    tags: [escape, code, rust, quotes]
+    difficulty: 4
+    prompt: |
+      Review this Rust function for the counting utility:
+
+      fn tally(items: &[String]) -> usize {
+          let mut n = 0usize;
+          for it in items {
+              if !it.is_empty() { n += 1; }
+          }
+          println!("counted {}", n);
+          n
+      }
+
+      Return JSON with:
+      - "snippet": the function verbatim as one string, braces and indentation
+        preserved, and the format string "counted {}" intact.
+      - "signature": just the fn signature line.
+      - "language": exactly "rust".
+      - "unsafe_blocks": integer, how many unsafe blocks the snippet contains.
+      - "needs_alloc": false.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        snippet:
+          type: string
+          minLength: 40
+        signature:
+          type: string
+          minLength: 10
+        language:
+          type: string
+          const: "rust"
+        unsafe_blocks:
+          type: integer
+          minimum: 0
+          maximum: 5
+        needs_alloc:
+          type: boolean
+      required: [snippet, signature, language, unsafe_blocks, needs_alloc]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.snippet": "println!(\"counted {}\", n);"
+        "$.signature": "fn tally(items: &[String]) -> usize {"
+      must_equal:
+        "$.unsafe_blocks": 0
+    max_rounds: 2
+    notes: |
+      中文说明：Rust 片段里同时有 `&[String]`（尖括号+方括号+&）、`->` 箭头、`{}` 空格式串和
+      `!` 宏调用。模型经常把 `{}` 当成需要填充的占位符替换掉，或者把 `&[String]` 简化成
+      `Vec<String>`。must_contain 分别钉住 println 行与签名行，unsafe_blocks 必须为 0 也顺手
+      检验模型是否真的读了代码而不是编造。
+  # ------------------------------------------------------------------ esc_005 --
+  - id: esc_005
+    title: Migration DDL with quoted identifiers and a quoted default
+    tags: [escape, sql, ddl, data-dictionary]
+    difficulty: 4
+    prompt: |
+      Write the data-dictionary entry for this migration:
+
+      CREATE TABLE "audit_log" (
+        "id" BIGSERIAL PRIMARY KEY,
+        "payload" JSONB NOT NULL DEFAULT '{}'::jsonb
+      );
+
+      Return JSON with:
+      - "ddl": the DDL verbatim as one string, keeping the double-quoted
+        "audit_log", "id" and "payload" identifiers and the '{}'::jsonb default.
+      - "rollback": a DROP TABLE statement for the same table, quoting the table
+        name the same way.
+      - "table_name": exactly audit_log, without quotes.
+      - "destructive": true.
+      - "column_count": integer, how many columns the table has.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        ddl:
+          type: string
+          minLength: 40
+        rollback:
+          type: string
+          minLength: 10
+        table_name:
+          type: string
+          const: "audit_log"
+        destructive:
+          type: boolean
+        column_count:
+          type: integer
+          minimum: 2
+          maximum: 4
+      required: [ddl, rollback, table_name, destructive, column_count]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.ddl": "\"payload\" JSONB NOT NULL DEFAULT '{}'::jsonb"
+        "$.rollback": "DROP TABLE \"audit_log\""
+      must_equal:
+        "$.destructive": true
+        "$.column_count": 2
+    max_rounds: 2
+    notes: |
+      中文说明：DDL 里 `"payload"` 是标识符，`'{}'` 是默认值字面量，`::jsonb` 是类型转换——三种
+      引号/冒号混在一行。模型最爱的崩法是"为了让 JSON 更好看"把标识符的双引号删掉，或者把
+      DEFAULT '{}' 写成 DEFAULT {} 造成非法 SQL。rollback 字段还要求它自己拼出带引号的
+      DROP TABLE，考察能否主动转义而不是只做复制。
+  # ------------------------------------------------------------------ esc_006 --
+  - id: esc_006
+    title: Regex catalogue with backslash classes and a quote lookbehind
+    tags: [escape, regex, backslash, array]
+    difficulty: 4
+    prompt: |
+      Build a regex catalogue for our log parser. The three patterns are exactly:
+
+      \d{3}-\d{4}
+      (?<=\")secret
+      ^\s*[\w.\-]+@[\w.\-]+\.\w{2,}$
+
+      Return JSON with:
+      - "patterns": an array holding those three patterns in that order, each as
+        its own JSON string with the backslashes intact (write \\d and \\s in the
+        JSON encoding so the decoded value is \d and \s).
+      - "naming": an array of three short English descriptions in the same order.
+      - "example_digits": a seven-digit sample string with no hyphens, spaces or
+        other separators, e.g. 8675309.
+      - "pattern_count": integer, how many patterns the catalogue holds.
+      - "anchored": true, because the third pattern is anchored.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        patterns:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: string
+            minLength: 5
+        naming:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: string
+            minLength: 5
+        example_digits:
+          type: string
+          minLength: 7
+          maxLength: 7
+          pattern: "^[0-9]{7}$"
+        pattern_count:
+          type: integer
+          minimum: 3
+          maximum: 3
+        anchored:
+          type: boolean
+      required: [patterns, naming, example_digits, pattern_count, anchored]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.patterns[0]": "\\d{3}-\\d{4}"
+        "$.patterns[1]": "(?<=\\\")secret"
+        "$.patterns[2]": "^\\s*[\\w.\\-]+@[\\w.\\-]+\\.\\w{2,}$"
+      must_match:
+        "$.example_digits": "\\d{7}"
+      must_equal:
+        "$.anchored": true
+        "$.pattern_count": 3
+    max_rounds: 2
+    notes: |
+      中文说明：正则里的反斜杠是转义地狱的震中：JSON 里每个 \d 都要写成 \\d，解码后才是一个
+      反斜杠。第二个模式 `(?<=\")secret` 更毒——它同时需要 \\ 和 \" 两种转义，模型经常少写一层
+      变成 (?<=")secret 或干脆把 \" 塌缩成 "，让 JSON 提前闭合。数组下标路径 $.patterns[1] 精确
+      定位到出问题的那一条，避免"整体看起来对"的假通过。
+  # ------------------------------------------------------------------ esc_007 --
+  - id: esc_007
+    title: LaTeX homework answer with sum, frac and an align block
+    tags: [escape, latex, backslash]
+    difficulty: 5
+    prompt: |
+      LaTeX homework. Use these fragments exactly, single backslashes:
+
+      \sum_{i=1}^{n}
+      \frac{n(n+1)}{2}
+      \begin{align} S &= \sum_{i=1}^{n} i \\ &= \frac{n(n+1)}{2} \end{align}
+
+      Return JSON with:
+      - "formula_intro": a sentence containing the \sum_{i=1}^{n} fragment.
+      - "answer_latex": the closed form \frac{n(n+1)}{2}.
+      - "proof_steps": an array of at least two strings, each a valid LaTeX step.
+      - "step_count": integer, how many steps you returned.
+      - "uses_display_delimiters": false — never use $$ display math delimiters.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        formula_intro:
+          type: string
+          minLength: 10
+        answer_latex:
+          type: string
+          minLength: 10
+        proof_steps:
+          type: array
+          minItems: 2
+          maxItems: 4
+          items:
+            type: string
+            minLength: 3
+        step_count:
+          type: integer
+          minimum: 2
+          maximum: 4
+        uses_display_delimiters:
+          type: boolean
+      required: [formula_intro, answer_latex, proof_steps, step_count, uses_display_delimiters]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.formula_intro": "\\sum_{i=1}^{n}"
+        "$.answer_latex": "\\frac{n(n+1)}{2}"
+      must_not_contain:
+        "$.answer_latex": "$$"
+      must_equal:
+        "$.uses_display_delimiters": false
+        "$.step_count": 2
+    max_rounds: 3
+    notes: |
+      中文说明：LaTeX 与 JSON 的转义规则正面冲突：`\sum` 在 JSON 里必须写成 `\\sum`，而 `\\`
+      （换行符）在 LaTeX 里是换行、在 JSON 里必须写成 `\\\\`。模型经常只转义一半，得到
+      "\sum"（非法转义序列）或 "\s"（被解析成 s），json.loads 直接报 bad_escape。must_contain
+      钉住 \sum 与 \frac 两处，must_not_contain 挡住用 $$ 包裹的偷懒写法。
+  # ------------------------------------------------------------------ esc_008 --
+  - id: esc_008
+    title: Markdown comparison table with pipes and newlines
+    tags: [escape, markdown, table, pipes]
+    difficulty: 3
+    prompt: |
+      Return the benchmark comparison as Markdown. The table must be exactly:
+
+      | model | pass@1 |
+      | --- | --- |
+      | deepseek | 0.82 |
+
+      Return JSON with:
+      - "table": the whole table as ONE string with real line breaks, pipes kept.
+      - "header_row": just the header line.
+      - "caption": one sentence that mentions pass@1.
+      - "data_rows": integer, how many body rows the table has.
+      - "html_used": false — never put <br> tags inside the table.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        table:
+          type: string
+          minLength: 40
+        header_row:
+          type: string
+          minLength: 5
+        caption:
+          type: string
+          minLength: 10
+        data_rows:
+          type: integer
+          minimum: 1
+          maximum: 3
+        html_used:
+          type: boolean
+      required: [table, header_row, caption, data_rows, html_used]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.table": "| --- | --- |"
+        "$.caption": "pass@1"
+      must_equal:
+        "$.header_row": "| model | pass@1 |"
+        "$.data_rows": 1
+      must_not_contain:
+        "$.table": "<br>"
+    max_rounds: 2
+    notes: |
+      中文说明：Markdown 表格同时踩两个雷：竖线在字符串里无害但会被模型"美化"成空格对齐，换行
+      必须写成 \n 而不能直接裸换行。must_equal 把 header_row 钉到逐字符相等，must_contain 检查
+      分隔行 `| --- | --- |` 没被改写成 `|---|---|`（少了空格）。must_not_contain 挡住用 <br>
+      代替换行的常见做法。
+  # ------------------------------------------------------------------ esc_009 --
+  - id: esc_009
+    title: Nested double quotes inside a sentence plus a null workaround
+    tags: [escape, quotes, null-value, bug-report]
+    difficulty: 3
+    prompt: |
+      Turn this tester report into JSON. The expected text, byte for byte, is:
+
+      He said "hi" then left.
+
+      Return JSON with:
+      - "expected_text": that sentence verbatim, inner double quotes preserved.
+      - "quoted_token": the single word that sits inside the double quotes.
+      - "quote_char_count": integer, how many double-quote characters the sentence
+        contains.
+      - "severity": one of low, medium or high.
+      - "workaround": set it to null — we could not find one.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        expected_text:
+          type: string
+          minLength: 10
+        quoted_token:
+          type: string
+          minLength: 2
+        quote_char_count:
+          type: integer
+          minimum: 0
+          maximum: 4
+        severity:
+          type: string
+          enum: ["low", "medium", "high"]
+        workaround:
+          type: ["string", "null"]
+      required: [expected_text, quoted_token, quote_char_count, severity, workaround]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.expected_text": "He said \"hi\" then left."
+        "$.quoted_token": "hi"
+        "$.quote_char_count": 2
+      must_be_null:
+        - "$.workaround"
+    max_rounds: 2
+    notes: |
+      中文说明：最经典的转义题——句子里嵌两对双引号。模型要么忘记 \" 让 JSON 在 "hi" 处断掉，
+      要么改用单引号 'hi' 回避转义（值就错了），要么把整句包进代码块。这里再叠加一个必须显式
+      null 的 workaround：类型 ["string","null"] 允许 null，must_be_null 则禁止用 "" 或
+      "none" 糊弄过去，一次同时考转义与"不编造"。
+  # ------------------------------------------------------------------ esc_010 --
+  - id: esc_010
+    title: Windows paths with single backslashes and a POSIX rewrite
+    tags: [escape, paths, windows, backslash]
+    difficulty: 4
+    prompt: |
+      The Windows build agent printed these two paths:
+
+      C:\Users\dev\build\out\app.exe
+      D:\cache\msbuild\17.0\tmp
+
+      Return JSON with:
+      - "exe_path": the first path verbatim — single backslashes, exactly as
+        printed (so the JSON encoding writes \\ for each one).
+      - "cache_dir": the second path verbatim, same rule.
+      - "posix_path": the same exe path rewritten with forward slashes only.
+      - "drive_letter": just the drive letter of the first path, one character.
+      - "segment_count": integer, how many backslash-separated segments the exe
+        path has.
+      - "is_unc": false — neither path is a UNC path.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        exe_path:
+          type: string
+          minLength: 10
+        cache_dir:
+          type: string
+          minLength: 10
+        posix_path:
+          type: string
+          minLength: 10
+        drive_letter:
+          type: string
+          const: "C"
+        segment_count:
+          type: integer
+          minimum: 2
+          maximum: 10
+        is_unc:
+          type: boolean
+      required: [exe_path, cache_dir, posix_path, drive_letter, segment_count, is_unc]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.exe_path": "C:\\Users\\dev\\build\\out\\app.exe"
+        "$.cache_dir": "D:\\cache\\msbuild\\17.0\\tmp"
+        "$.posix_path": "C:/Users/dev/build/out/app.exe"
+      must_equal:
+        "$.is_unc": false
+        "$.segment_count": 6
+    max_rounds: 2
+    notes: |
+      中文说明：Windows 路径是反斜杠地狱：JSON 里每个 \ 都要写成 \\，而模型经常忘记，把
+      C:\Users\dev 写成 C:\Users\dev（\U 直接是非法转义）或干脆全部换成 /。must_contain 逐条钉住
+      两条原始路径和改写后的 POSIX 路径，逼模型同时给出"保留反斜杠"和"换成斜杠"两个版本；
+      segment_count 必须为 6（C: / Users / dev / build / out / app.exe）防止它只是复制没理解。
+  # ------------------------------------------------------------------ esc_011 --
+  - id: esc_011
+    title: Glob patterns and matched POSIX paths
+    tags: [escape, paths, glob, array]
+    difficulty: 2
+    prompt: |
+      Summarise the file-discovery step for the CI log. Use exactly:
+
+        include glob: src/**/*.py
+        exclude glob: **/node_modules/**
+        matched files: /home/ci/repo/src/main.py, /home/ci/repo/src/pkg/util.py
+
+      Return JSON with:
+      - "include_glob": the include pattern verbatim, double asterisks included.
+      - "exclude_glob": the exclude pattern verbatim.
+      - "matched": an array with the two file paths in the order given.
+      - "match_count": integer, how many files matched.
+      - "follow_symlinks": false.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        include_glob:
+          type: string
+          minLength: 5
+        exclude_glob:
+          type: string
+          minLength: 5
+        matched:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            type: string
+            minLength: 5
+        match_count:
+          type: integer
+          minimum: 1
+          maximum: 5
+        follow_symlinks:
+          type: boolean
+      required: [include_glob, exclude_glob, matched, match_count, follow_symlinks]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.include_glob": "src/**/*.py"
+        "$.exclude_glob": "**/node_modules/**"
+        "$.matched[0]": "/home/ci/repo/src/main.py"
+        "$.matched[1]": "/home/ci/repo/src/pkg/util.py"
+      must_equal:
+        "$.match_count": 2
+        "$.follow_symlinks": false
+    max_rounds: 2
+    notes: |
+      中文说明：相对基础的转义题，用来给维度提供低难度锚点：glob 里的 ** 与 * 在 JSON 字符串里
+      本身无害，但模型常把它们当 Markdown 加粗符号处理，或把 /home/ci/... 拼成 ~/ci/...。
+      must_contain 同时检查数组两个下标，确保顺序没有被"整理"过。
+  # ------------------------------------------------------------------ esc_012 --
+  - id: esc_012
+    title: JSON serialised inside a JSON string value
+    tags: [escape, json-in-json, double-encoding]
+    difficulty: 5
+    prompt: |
+      Our queue API takes the routing config as a *string* whose contents are
+      themselves serialised JSON — not as a nested object. Serialise exactly this:
+
+      {"retries": 3, "backoff": "exponential"}
+
+      Return JSON with:
+      - "config_json": that text as ONE string, escaped properly, compact: no
+        pretty printing, no added spaces, no changes to key order.
+      - "retries": the retry count as an integer, parsed out of it.
+      - "backoff": exactly exponential.
+      - "is_valid_json": true.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        config_json:
+          type: string
+          minLength: 20
+          maxLength: 200
+        retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+        backoff:
+          type: string
+          const: "exponential"
+        is_valid_json:
+          type: boolean
+      required: [config_json, retries, backoff, is_valid_json]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.config_json": "{\"retries\": 3, \"backoff\": \"exponential\"}"
+      must_equal:
+        "$.retries": 3
+        "$.is_valid_json": true
+    max_rounds: 3
+    notes: |
+      中文说明：双层转义——要输出的内容本身就是一段 JSON，所以每一个内层 " 在外层 JSON 里都得写成
+      \"。模型在这里的典型崩法是二选一：要么把 config_json 写成真正的嵌套对象（类型错），要么
+      转义漏一半让外层 JSON 崩溃。同时必须把 retries 作为整数单独解析出来，确认模型"真的理解"
+      而不是只做字符搬运；is_valid_json 为 true 也要求它对自己的产物负责。
+  # ------------------------------------------------------------------ esc_013 --
+  - id: esc_013
+    title: Shell one-liner and heredoc header with quotes and redirects
+    tags: [escape, shell, heredoc]
+    difficulty: 3
+    prompt: |
+      Document the cleanup job. Copy these two lines byte for byte:
+
+      awk -F',' '{print $2}' data.csv | sort -u > out.txt
+      cat <<'EOF' > /tmp/notes.md
+
+      Return JSON with:
+      - "one_liner": the first line, with its single-quoted awk program and the
+        > redirect intact.
+      - "heredoc_header": the second line, with the quoted 'EOF' delimiter intact.
+      - "shell": exactly "bash".
+      - "exit_code": integer 0, the code we expect on success.
+      - "chained": false — the command stays a single pipeline, no && chaining.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        one_liner:
+          type: string
+          minLength: 20
+        heredoc_header:
+          type: string
+          minLength: 10
+        shell:
+          type: string
+          const: "bash"
+        exit_code:
+          type: integer
+          minimum: 0
+          maximum: 255
+        chained:
+          type: boolean
+      required: [one_liner, heredoc_header, shell, exit_code, chained]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.one_liner": "awk -F',' '{print $2}' data.csv | sort -u > out.txt"
+        "$.heredoc_header": "cat <<'EOF' > /tmp/notes.md"
+      must_not_contain:
+        "$.one_liner": "&&"
+      must_equal:
+        "$.exit_code": 0
+        "$.chained": false
+    max_rounds: 2
+    notes: |
+      中文说明：shell 一行命令把单引号、`<<`、`>`、`|` 和 `$2` 全塞进一个字符串。模型常把
+      awk 程序里的单引号改成双引号（值就变了），或者"贴心地"把管道拆成多行。must_not_contain
+      的 && 既检测"擅自串联命令"，也顺带确认这串内容没有被重新排版。heredoc 的 <<'EOF' 带引号
+      定界符是另一个容易被规范化掉的点。
+  # ------------------------------------------------------------------ esc_014 --
+  - id: esc_014
+    title: Emoji and CJK release note kept as raw characters
+    tags: [escape, unicode, emoji, cjk]
+    difficulty: 2
+    prompt: |
+      Localise the release note for the zh-CN audience.
+
+      Return JSON with:
+      - "title_zh": a title that contains the rocket emoji 🚀, then exactly one
+        space, then 版本发布.
+      - "body_zh": exactly this sentence, full-width comma included:
+        修复了转义导致的问题，感谢反馈！
+      - "locale": exactly "zh-CN".
+      - "has_emoji": true.
+      - "char_count": integer, the number of characters in body_zh counted as
+        Unicode code points (the full-width comma ， and ！ each count as one).
+
+      Write the characters themselves — do not escape the CJK text as \uXXXX
+      sequences.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        title_zh:
+          type: string
+          minLength: 2
+        body_zh:
+          type: string
+          minLength: 10
+        locale:
+          type: string
+          const: "zh-CN"
+        has_emoji:
+          type: boolean
+        char_count:
+          type: integer
+          minimum: 1
+          maximum: 200
+      required: [title_zh, body_zh, locale, has_emoji, char_count]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.title_zh": "🚀 版本发布"
+        "$.body_zh": "修复了转义导致的问题，感谢反馈！"
+      must_equal:
+        "$.char_count": 16
+        "$.has_emoji": true
+      must_not_contain:
+        "$.body_zh": "\\u"
+    max_rounds: 2
+    notes: |
+      中文说明：emoji 是代理对、CJK 是全角标点，两者都必须原样写进 JSON 字符串。低难度体现在
+      这里主要考"不折腾"：不要为了安全把中文转成 \u4fee\u590d...，也不要把全角逗号换成半角。
+      must_not_contain 的 \u 正是抓"过度转义"这一路；char_count=16 则要求它真的按码点计数，
+      而不是按 UTF-8 字节或按"看起来几个字"。
+  # ------------------------------------------------------------------ esc_015 --
+  - id: esc_015
+    title: Arabic and Hebrew RTL strings without direction marks
+    tags: [escape, unicode, rtl, i18n]
+    difficulty: 3
+    prompt: |
+      Add the RTL strings to the i18n bundle. Use exactly:
+
+        Arabic:  تم إصلاح مشكلة الهروب من الأحرف
+        Hebrew:  תיקון בעיית בריחה
+
+      Return JSON with:
+      - "summary_ar": the Arabic sentence verbatim, right-to-left, no extra
+        punctuation.
+      - "summary_he": the Hebrew sentence verbatim.
+      - "direction": exactly "rtl".
+      - "rtl_marks_present": false — do not insert U+200F RIGHT-TO-LEFT MARK.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        summary_ar:
+          type: string
+          minLength: 5
+        summary_he:
+          type: string
+          minLength: 5
+        direction:
+          type: string
+          const: "rtl"
+        rtl_marks_present:
+          type: boolean
+      required: [summary_ar, summary_he, direction, rtl_marks_present]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.summary_ar": "تم إصلاح مشكلة الهروب من الأحرف"
+        "$.summary_he": "תיקון בעיית בריחה"
+      must_not_contain:
+        "$.summary_ar": "\u200F"
+      must_equal:
+        "$.direction": "rtl"
+        "$.rtl_marks_present": false
+    max_rounds: 2
+    notes: |
+      中文说明：RTL 文本本身是合法 JSON，真正的坑在于模型（或模型的后处理）喜欢插入 U+200F /
+      U+202B 之类的方向控制符来"修正显示顺序"，或者把 RTL 词序按视觉顺序倒过来。must_contain
+      逐字校验两句话，must_not_contain 用真实的 U+200F 字符（而不是字面量 "\u200F"）来抓隐形
+      控制符的注入。
+  # ------------------------------------------------------------------ esc_016 --
+  - id: esc_016
+    title: Decomposed accent, ZWJ emoji and a zero-width space
+    tags: [escape, unicode, combining, zero-width]
+    difficulty: 5
+    prompt: |
+      We are testing Unicode fidelity byte for byte. Return JSON with:
+      - "word": the decomposed spelling c-a-f-e followed by U+0301 COMBINING
+        ACUTE ACCENT as a separate code point (so five code points total).
+      - "family": the emoji sequence U+1F468 U+200D U+1F469 U+200D U+1F467 with
+        nothing between the code points.
+      - "zwsp_sample": the letters A and B separated by exactly one U+200B ZERO
+        WIDTH SPACE.
+      - "nfc_normalized": false — your "word" must NOT be NFC-normalised into the
+        precomposed character.
+      - "codepoint_count": integer, the number of Unicode code points in "word".
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        word:
+          type: string
+          minLength: 4
+          maxLength: 8
+        family:
+          type: string
+          minLength: 3
+          maxLength: 12
+        zwsp_sample:
+          type: string
+          minLength: 3
+          maxLength: 5
+        nfc_normalized:
+          type: boolean
+        codepoint_count:
+          type: integer
+          minimum: 1
+          maximum: 10
+      required: [word, family, zwsp_sample, nfc_normalized, codepoint_count]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.word": "cafe\u0301"
+        "$.family": "\U0001F468\u200D\U0001F469\u200D\U0001F467"
+        "$.zwsp_sample": "A\u200BB"
+        "$.nfc_normalized": false
+        "$.codepoint_count": 5
+    max_rounds: 3
+    notes: |
+      中文说明：这是本维度最难的一档，因为失败往往是"看不见"的：模型（或 API 侧）会把
+      cafe+U+0301 规范化成预组合的 café（NFC），把 ZWJ 家庭 emoji 拆成三个独立 emoji，
+      或者把 U+200B 当成"多余字符"删掉。三种情况都不影响 JSON 语法，却让下游拿到完全不同的
+      字节。must_equal 逐码点钉死三个字符串，nfc_normalized=false 与 codepoint_count=5 则
+      迫使模型对自己输出的码点结构负责。
+  # ------------------------------------------------------------------ esc_017 --
+  - id: esc_017
+    title: Tab and trailing newline preserved inside a log line
+    tags: [escape, whitespace, tab, newline]
+    difficulty: 5
+    prompt: |
+      Capture the raw log line byte for byte. The line is:
+
+        a literal TAB character (U+0009), then 2024-01-02 ERROR disk full,
+        then a single LF newline (U+000A).
+
+      Return JSON with:
+      - "raw_line": that string with the TAB and the LF preserved (JSON encodes
+        them as \t and \n).
+      - "escaped_preview": the same content but with the TAB written as the
+        two-character sequence \t and the newline as \n, backslashes included.
+      - "starts_with_tab": true.
+      - "ends_with_newline": true.
+      - "char_count": integer, the length of "raw_line" counting the TAB and the
+        LF, which is 28.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        raw_line:
+          type: string
+          minLength: 10
+          maxLength: 60
+        escaped_preview:
+          type: string
+          minLength: 10
+          maxLength: 80
+        starts_with_tab:
+          type: boolean
+        ends_with_newline:
+          type: boolean
+        char_count:
+          type: integer
+          minimum: 1
+          maximum: 100
+      required: [raw_line, escaped_preview, starts_with_tab, ends_with_newline, char_count]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.raw_line": "\t2024-01-02 ERROR disk full\n"
+        "$.escaped_preview": "\\t2024-01-02 ERROR disk full\\n"
+        "$.starts_with_tab": true
+        "$.ends_with_newline": true
+        "$.char_count": 28
+    max_rounds: 3
+    notes: |
+      中文说明：前后空白是最容易被"顺手清理"的东西：很多模型在生成字符串前会 strip 掉首尾空白，
+      于是行首的 TAB 和行尾的 \n 直接消失，而 JSON 依然合法、schema 依然通过——只有 must_equal
+      才能抓住。escaped_preview 又反向考一次：这次需要的是两个字面字符（反斜杠 + t），因此
+      JSON 里必须写成 \\t，与 raw_line 的 \t 正好互为镜像。
+  # ------------------------------------------------------------------ esc_018 --
+  - id: esc_018
+    title: Base64 payload with plus, slash and padding
+    tags: [escape, base64, blob]
+    difficulty: 3
+    prompt: |
+      Attach the file inline. The payload "Hello, World!" is base64-encoded as
+      SGVsbG8sIFdvcmxkIQ== and its UTF-8 byte length is 13. The base64 SHA-256 of
+      the empty string is 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=.
+
+      Return JSON with:
+      - "content_b64": exactly SGVsbG8sIFdvcmxkIQ==, padding = signs included.
+      - "sha256_b64": exactly 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=.
+      - "byte_length": integer 13.
+      - "is_utf8": true.
+      - "wrapped": false — the base64 must stay on one line, no line breaks.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        content_b64:
+          type: string
+          minLength: 4
+          maxLength: 64
+        sha256_b64:
+          type: string
+          minLength: 20
+          maxLength: 64
+        byte_length:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        is_utf8:
+          type: boolean
+        wrapped:
+          type: boolean
+      required: [content_b64, sha256_b64, byte_length, is_utf8, wrapped]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.content_b64": "SGVsbG8sIFdvcmxkIQ=="
+        "$.sha256_b64": "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+        "$.byte_length": 13
+        "$.is_utf8": true
+        "$.wrapped": false
+      must_not_contain:
+        "$.content_b64": "\n"
+    max_rounds: 2
+    notes: |
+      中文说明：base64 里的 + / = 都是 JSON 安全字符，但对模型来说"看起来很随机"，于是它经常
+      自作主张：把 + 换成 -（base64url）、把 = padding 去掉、或者按 76 列折行。must_equal 把
+      两个 blob 钉到逐字符相等，must_not_contain 的换行检测专门抓折行，wrapped=false 则要求
+      模型在语义字段上同样承认自己没有折行。
+  # ------------------------------------------------------------------ esc_019 --
+  - id: esc_019
+    title: JWT with dots and base64url hyphens
+    tags: [escape, jwt, base64url, token]
+    difficulty: 4
+    prompt: |
+      Decode the JWT we captured:
+
+      eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+
+      Return JSON with:
+      - "raw_token": the token verbatim, both dots and the hyphen inside the
+        signature segment intact.
+      - "header_b64": just the first segment.
+      - "payload_json": the decoded middle segment as text, containing the pair
+        "name":"John Doe".
+      - "signature_b64url": just the third segment — base64url characters only,
+        hyphens allowed, no + or / and no padding.
+      - "segment_count": integer, how many dot-separated segments the token has.
+      - "alg": exactly "HS256", taken from the header.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        raw_token:
+          type: string
+          minLength: 40
+        header_b64:
+          type: string
+          minLength: 10
+        payload_json:
+          type: string
+          minLength: 10
+        signature_b64url:
+          type: string
+          minLength: 10
+          pattern: "^[A-Za-z0-9_-]+$"
+        segment_count:
+          type: integer
+          minimum: 1
+          maximum: 5
+        alg:
+          type: string
+          const: "HS256"
+      required: [raw_token, header_b64, payload_json, signature_b64url, segment_count, alg]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.raw_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+        "$.segment_count": 3
+      must_contain:
+        "$.header_b64": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+        "$.payload_json": "\"name\":\"John Doe\""
+      must_match:
+        "$.signature_b64url": "[A-Za-z0-9_-]+"
+    max_rounds: 2
+    notes: |
+      中文说明：JWT 是"长、密、易被截断"的典型：模型经常(a)在长签名段中间漏字符或行末折行，
+      (b)把 base64url 的 - 换成 +，(c)解码中间段后忘记把 "name":"John Doe" 里的双引号重新转义
+      ——payload_json 本身也是"JSON 里的 JSON 字符串"，多一层转义。segment_count=3 用来确认它
+      真的按点切分而不是猜的。
+  # ------------------------------------------------------------------ esc_020 --
+  - id: esc_020
+    title: PEM private-key block with newline-joined lines
+    tags: [escape, pem, newline, key]
+    difficulty: 5
+    prompt: |
+      Produce a placeholder PEM block for the test fixture. Use these three lines:
+
+      header: -----BEGIN RSA PRIVATE KEY-----
+      body (one line, exactly):
+      MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8QuKUpRKfFLfRYC9AIKjbJTWit+CqvjWYzvQwECAwEAAQJAIJLixBy2qpFoS4DSmoEm
+      footer: -----END RSA PRIVATE KEY-----
+
+      The three lines are joined with LF characters into a single string.
+
+      Return JSON with:
+      - "pem": the whole block as one string, the three lines separated by
+        newlines and nothing else.
+      - "header_line": just the header line.
+      - "body_b64": just the body line.
+      - "line_count": integer, how many lines the block has.
+      - "encrypted": false — this key is not encrypted.
+
+      The PEM payload must contain no blank lines and no runs of two or more
+      spaces used for alignment.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        pem:
+          type: string
+          minLength: 60
+        header_line:
+          type: string
+          minLength: 10
+        body_b64:
+          type: string
+          minLength: 40
+        line_count:
+          type: integer
+          minimum: 1
+          maximum: 10
+        encrypted:
+          type: boolean
+      required: [pem, header_line, body_b64, line_count, encrypted]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.pem": "-----END RSA PRIVATE KEY-----"
+        "$.body_b64": "MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8QuKUpRKfFLfRYC9AIKjbJTWit+CqvjWYzvQwECAwEAAQJAIJLixBy2qpFoS4DSmoEm"
+      must_equal:
+        "$.header_line": "-----BEGIN RSA PRIVATE KEY-----"
+        "$.line_count": 3
+        "$.encrypted": false
+      must_not_contain:
+        "$.pem": "  "
+    max_rounds: 3
+    notes: |
+      中文说明：PEM 块要求"只有换行、没有空格、没有空行"，而模型的排版本能会让它做三件坏事：
+      (a) 把 64 字符的 body 按 64 列再折一次行，(b) 在 header/footer 前后加空行，(c) 用空格
+      对齐。must_not_contain 的空格检测 + line_count=3 + header_line 逐字符相等，把"看起来像
+      PEM"的伪块全部判死。长 body 行还顺带考模型的长字符串抄写准确性。
+  # ------------------------------------------------------------------ esc_021 --
+  - id: esc_021
+    title: SQL with an embedded JSON literal and a JSONB operator
+    tags: [escape, sql, json-in-json, jsonb]
+    difficulty: 4
+    prompt: |
+      One statement both filters and projects a JSONB payload:
+
+      SELECT id, payload->>'name' AS name FROM events WHERE payload @> '{"kind": "click"}';
+
+      Return JSON with:
+      - "sql": the statement verbatim as one string, keeping the ->> operator, the
+        @> operator and the single-quoted JSON literal with its inner double
+        quotes.
+      - "json_literal": just the embedded JSON literal {"kind": "click"} as a
+        string.
+      - "uses_jsonb_operator": true.
+      - "projection_column": exactly "name", the alias of the projected field.
+      - "param_count": integer 0 — we bind no parameters.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        sql:
+          type: string
+          minLength: 20
+        json_literal:
+          type: string
+          minLength: 5
+          maxLength: 100
+        uses_jsonb_operator:
+          type: boolean
+        projection_column:
+          type: string
+          const: "name"
+        param_count:
+          type: integer
+          minimum: 0
+          maximum: 9
+      required: [sql, json_literal, uses_jsonb_operator, projection_column, param_count]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.sql": "payload @> '{\"kind\": \"click\"}'"
+      must_equal:
+        "$.json_literal": "{\"kind\": \"click\"}"
+        "$.uses_jsonb_operator": true
+        "$.param_count": 0
+    max_rounds: 2
+    notes: |
+      中文说明：SQL 的单引号字符串里还嵌着 JSON 的双引号，于是这句话在 JSON 输出里要写成
+      '{\"kind\": \"click\"}'。模型常见的失败是把内层双引号改成单引号（'{"kind": "click"}' →
+      '{\'kind\': \'click\'}'），语义完全不同；或者把 ->> 简化成 ->。must_contain 精确钉住
+      @> 后面的那段字面量，json_literal 字段则要求它把内嵌 JSON 单独再输出一次。
+  # ------------------------------------------------------------------ esc_022 --
+  - id: esc_022
+    title: Multi-line traceback mixing quotes, backslashes and a path
+    tags: [escape, traceback, windows, mixed]
+    difficulty: 4
+    prompt: |
+      File a bug report. Here is the traceback from the Windows build:
+
+      Traceback (most recent call last):
+        File "C:\repo\app\main.py", line 42, in <module>
+          cfg = json.loads(payload)
+      ValueError: Expecting value: line 1 column 1 (char 0)
+
+      Return JSON with:
+      - "traceback": the whole traceback as one multi-line string. Keep the
+        double-quoted file path with its single backslashes exactly as printed.
+      - "exception_line": just the ValueError line.
+      - "snippet_line": just the cfg = json.loads(payload) line.
+      - "line_number": integer, the line number the failure points at.
+      - "platform": exactly "windows".
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        traceback:
+          type: string
+          minLength: 40
+        exception_line:
+          type: string
+          minLength: 10
+        snippet_line:
+          type: string
+          minLength: 5
+        line_number:
+          type: integer
+          minimum: 1
+          maximum: 9999
+        platform:
+          type: string
+          const: "windows"
+      required: [traceback, exception_line, snippet_line, line_number, platform]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_contain:
+        "$.traceback": "File \"C:\\repo\\app\\main.py\", line 42, in <module>"
+        "$.snippet_line": "cfg = json.loads(payload)"
+      must_equal:
+        "$.exception_line": "ValueError: Expecting value: line 1 column 1 (char 0)"
+        "$.line_number": 42
+    max_rounds: 3
+    notes: |
+      中文说明：综合题：一段 traceback 同时包含换行、成对的双引号、Windows 路径的反斜杠和
+      Expecting value 这种带括号与数字的报文。JSON 输出里每个换行要写 \n、路径里每个 \ 要写 \\、
+      路径两端的 " 要写 \"——三者任一失手都会让 json.loads() 崩溃。exception_line 要求逐字符相等，
+      用来区分"抄对了"和"凭记忆重写"。

@@ -1,0 +1,104 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "structbench"
+version = "0.1.0"
+description = "Stress-testing LLMs on extreme JSON schemas, nested tool calls, and self-healing recovery."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "StructBench Contributors" }]
+keywords = [
+    "llm",
+    "benchmark",
+    "evaluation",
+    "structured-output",
+    "json-schema",
+    "tool-calling",
+    "function-calling",
+    "agent",
+    "self-healing",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "typer>=0.12",
+    "rich>=13.7",
+    "jinja2>=3.1",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23; python_version < '4'",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+structbench = "structbench.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/structbench/structbench"
+Repository = "https://github.com/structbench/structbench"
+Issues = "https://github.com/structbench/structbench/issues"
+Changelog = "https://github.com/structbench/structbench/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/structbench"]
+
+# Ship the repo-level `datasets/` directory inside the wheel so that
+# `pip install structbench` users get the bundled benchmark suite too.
+[tool.hatch.build.targets.wheel.force-include]
+"datasets" = "structbench/datasets"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "datasets", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = [".tmp", ".uv-python", ".uv-cache", ".pytest-work", ".pytest-tmp", "results"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "E501",    # line length is handled by the formatter's judgement, not a hard rule
+    "B008",    # Typer's API *requires* function calls in argument defaults
+    "UP007",   # dynamic unions (Union[tuple(types)]) cannot use PEP 604 syntax
+    "UP038",   # isinstance(x, (int, float)) is measurably faster than int | float
+    "RUF001",  # ambiguous unicode: the reports are intentionally bilingual
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.pytest.ini_options]
+# The suite itself uses plain sync tests that drive ``asyncio.run`` internally,
+# so it runs with *zero* plugins beyond pytest. pytest-asyncio is only needed if
+# you add `async def` tests of your own.
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning"]

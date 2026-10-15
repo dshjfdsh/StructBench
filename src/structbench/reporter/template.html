@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --ink: #1c2430;
+    --muted: #6b7684;
+    --line: #e3e8ef;
+    --accent: #2f6fed;
+    --good: #16a34a;
+    --warn: #d97706;
+    --bad: #dc2626;
+    --fence: #ca8a04;
+    --syntax: #dc2626;
+    --schema: #9333ea;
+    --halluc: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.55 -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    background: linear-gradient(135deg, #16233a, #223a5e 60%, #2f6fed);
+    color: #fff;
+    padding: 28px 32px 22px;
+  }
+  header h1 { margin: 0 0 6px; font-size: 24px; letter-spacing: .3px; }
+  header .slogan { color: #b9cbe8; font-size: 13px; margin-bottom: 14px; }
+  header .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12.5px; color: #d7e3f7; }
+  header .meta b { color: #fff; font-weight: 600; }
+  main { padding: 22px 32px 60px; max-width: 1500px; margin: 0 auto; }
+  section { margin-bottom: 26px; }
+  h2 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  h2 .hint { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+  }
+  .grid { display: grid; gap: 16px; }
+  .grid.two { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+  .chart { width: 100%; height: 340px; }
+  .chart.tall { height: 400px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  tbody tr:hover { background: #f8fafc; }
+  .rate { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .r90 { color: var(--good); } .r75 { color: #4d7c0f; } .r60 { color: var(--warn); }
+  .r40 { color: #ea580c; } .r0 { color: var(--bad); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+  .pill {
+    display: inline-block; padding: 1px 7px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600; border: 1px solid transparent;
+  }
+  .pill.ok { background: #e8f7ee; color: var(--good); border-color: #bcdfc9; }
+  .pill.healed { background: #fef6e7; color: var(--warn); border-color: #f2ddb4; }
+  .pill.fail { background: #fdecec; color: var(--bad); border-color: #f5c6c6; }
+  .pill.fence { background: #fdf6e3; color: var(--fence); border-color: #eeddb0; }
+  .pill.syntax { background: #fdecec; color: var(--syntax); border-color: #f5c6c6; }
+  .pill.schema { background: #f6ecfd; color: var(--schema); border-color: #e2cdf7; }
+  .pill.halluc { background: #fdeaea; color: var(--halluc); border-color: #f3c3c3; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+  select, button {
+    font: inherit; padding: 6px 10px; border-radius: 7px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  details.case { border: 1px solid var(--line); border-radius: 9px; margin-bottom: 8px; background: #fff; }
+  details.case > summary {
+    cursor: pointer; padding: 10px 14px; display: flex; flex-wrap: wrap;
+    gap: 10px; align-items: center; list-style: none;
+  }
+  details.case > summary::-webkit-details-marker { display: none; }
+  details.case[open] > summary { border-bottom: 1px solid var(--line); background: #f8fafc; }
+  details.case > summary:hover { background: #f8fafc; }
+  .case-id { font-weight: 700; font-family: ui-monospace, monospace; }
+  .case-body { padding: 14px; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+  .pane { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fcfdff; }
+  .pane h4 { margin: 0; padding: 8px 12px; font-size: 12.5px; background: #f1f5f9; border-bottom: 1px solid var(--line); color: var(--muted); }
+  .pane pre {
+    margin: 0; padding: 12px; overflow: auto; max-height: 320px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px; white-space: pre-wrap; word-break: break-word;
+  }
+  .pane .text { padding: 12px; font-size: 13px; }
+  .issues { margin: 0; padding: 10px 12px 10px 28px; font-size: 12.5px; }
+  .issues li { margin-bottom: 4px; }
+  .issues code { background: #eef2f7; padding: 1px 5px; border-radius: 4px; }
+  .round-head { display: flex; gap: 10px; align-items: center; font-size: 12.5px; color: var(--muted); padding: 8px 12px 0; }
+  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  footer { color: var(--muted); font-size: 12px; padding: 0 32px 40px; text-align: center; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>{{ title }}</h1>
+  <div class="slogan">
+    Stress-testing LLMs on extreme JSON schemas, nested tool calls, and self-healing recovery
+    · 专治大模型「格式崩坏」与「参数幻觉」
+  </div>
+  <div class="meta">
+    <span>StructBench <b>v{{ meta.version }}</b></span>
+    <span><b>{{ meta.models|length }}</b> 个模型 × <b>{{ meta.case_count }}</b> 道边界用例</span>
+    <span>并发 <b>{{ meta.concurrency }}</b></span>
+    <span>每题最多 <b>{{ meta.max_rounds }}</b> 轮</span>
+    <span>生成于 <b>{{ meta.created_at }}</b></span>
+    {% if meta.meta.json_mode %}<span>response_format: <b>json_object</b></span>{% endif %}
+    {% if meta.meta.stream is defined %}<span>流式 TTFT: <b>{{ 'on' if meta.meta.stream else 'off' }}</b></span>{% endif %}
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>排行榜 <span class="hint">Pass@1 = 首轮通过率 · Heal@1 = 报错回传后总通过率 · Repair = 出错后修复率</span></h2>
+    <div class="card">
+      <table id="leaderboard">
+        <thead>
+          <tr>
+            <th>模型</th>
+            <th>Pass@1</th>
+            <th>Heal@1</th>
+            <th>Repair</th>
+            <th>Δ 提升</th>
+            <th>P50</th>
+            <th>P95</th>
+            <th>TTFT p50</th>
+            <th>TPS</th>
+            <th>Tokens</th>
+            <th>用例数</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="toolbar" style="margin-top:12px">
+        <button id="copy-md">复制 Markdown 排行榜</button>
+        <span class="hint" id="copy-hint"></span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>能力雷达与维度对比 <span class="hint">每根轴是该维度的 Pass@1</span></h2>
+    <div class="grid two">
+      <div class="card"><div id="chart-radar" class="chart tall"></div></div>
+      <div class="card"><div id="chart-passheal" class="chart tall"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>错误类型分布 <span class="hint">仅统计首轮尝试，按五类病灶归因</span></h2>
+    <div class="grid two">
+      <div class="card"><div id="chart-taxonomy" class="chart tall"></div></div>
+      <div class="card"><div id="chart-difficulty" class="chart tall"></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>性能与成本 <span class="hint">端到端延迟与吞吐（含自愈重试请求）</span></h2>
+    <div class="card"><div id="chart-latency" class="chart"></div></div>
+  </section>
+
+  <section>
+    <h2>失败 Case 对照 <span class="hint" id="failure-hint"></span></h2>
+    <div class="card">
+      <div class="toolbar">
+        <label>模型
+          <select id="filter-model"><option value="">全部</option></select>
+        </label>
+        <label>维度
+          <select id="filter-category"><option value="">全部</option></select>
+        </label>
+        <label>结局
+          <select id="filter-outcome">
+            <option value="">全部</option>
+            <option value="failed">自愈后仍失败</option>
+            <option value="healed">自愈成功</option>
+          </select>
+        </label>
+        <label>病灶
+          <select id="filter-label"><option value="">全部</option></select>
+        </label>
+        <button id="expand-all">展开全部</button>
+        <button id="collapse-all">折叠全部</button>
+      </div>
+      <div id="failure-list"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Generated by <a href="https://github.com/structbench/structbench">StructBench</a> v{{ meta.version }} ·
+  所有判定均由 JSON AST + Pydantic v2 严格校验得出，无需裁判模型，100% 可复现
+</footer>
+
+<script type="application/json" id="sb-data">{{ data_json }}</script>
+{% if echarts_src %}<script src="{{ echarts_src }}"></script>{% else %}<script>{{ echarts_inline }}</script>{% endif %}
+<script>
+const DATA = JSON.parse(document.getElementById('sb-data').textContent);
+const PALETTE = ['#2f6fed', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#65a30d', '#db2777'];
+
+const LABEL_CLASS = {
+  'Markdown_Wrapper_Leak': 'fence',
+  'Syntax_Truncated': 'syntax',
+  'Schema_Type_Mismatch': 'schema',
+  'Enum_Or_Value_Hallucination': 'halluc',
+  'Valid_Pass': 'ok'
+};
+const LABEL_ZH = Object.fromEntries(DATA.labels.map(l => [l.key, l.zh]));
+
+/* ---------- helpers ---------- */
+const fmtRate = v => (v === null || v === undefined) ? '—' : v.toFixed(1) + '%';
+const rateClass = v => v === null || v === undefined ? '' :
+  v >= 90 ? 'r90' : v >= 75 ? 'r75' : v >= 60 ? 'r60' : v >= 40 ? 'r40' : 'r0';
+const fmtMs = v => v === null || v === undefined ? '—' :
+  v >= 1000 ? (v / 1000).toFixed(2) + 's' : Math.round(v) + 'ms';
+const fmtInt = v => (v === null || v === undefined) ? '—' : v.toLocaleString('en-US');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* ---------- leaderboard ---------- */
+const sorted = [...DATA.models].sort((a, b) => b.pass_at_1_rate - a.pass_at_1_rate);
+document.querySelector('#leaderboard tbody').innerHTML = sorted.map(m => {
+  const delta = (m.heal_at_1_rate - m.pass_at_1_rate);
+  return `<tr>
+    <td><b>${esc(m.name)}</b>${m.unusable ? ' <span class="pill fail">全部请求失败</span>'
+      : m.provider_failures ? ` <span class="pill healed">${m.provider_failures} 次请求失败</span>` : ''}</td>
+    <td class="rate ${rateClass(m.pass_at_1_rate)}">${fmtRate(m.pass_at_1_rate)}</td>
+    <td class="rate ${rateClass(m.heal_at_1_rate)}">${fmtRate(m.heal_at_1_rate)}</td>
+    <td class="rate ${rateClass(m.repair_rate)}">${fmtRate(m.repair_rate)}</td>
+    <td class="rate" style="color:#16a34a">${delta > 0 ? '+' + delta.toFixed(1) : '—'}</td>
+    <td>${fmtMs(m.p50_ms)}</td>
+    <td>${fmtMs(m.p95_ms)}</td>
+    <td>${fmtMs(m.ttft_p50_ms)}</td>
+    <td>${m.tps ? m.tps.toFixed(1) : '—'}</td>
+    <td>${fmtInt(m.total_tokens)}</td>
+    <td>${m.total}</td>
+  </tr>`;
+}).join('');
+
+/* ---------- charts ---------- */
+const charts = [];
+const chart = (id, option) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const instance = echarts.init(el, null, { renderer: 'canvas' });
+  instance.setOption(option);
+  charts.push(instance);
+  return instance;
+};
+const baseGrid = { left: 58, right: 24, top: 46, bottom: 40 };
+const axisLabelStyle = { color: '#6b7684', fontSize: 11 };
+
+if (DATA.categories.length >= 3) {
+  chart('chart-radar', {
+    title: { text: '维度能力雷达（Pass@1）', left: 'center', textStyle: { fontSize: 13, color: '#1c2430' } },
+    tooltip: { trigger: 'item' },
+    legend: { bottom: 0, type: 'scroll', textStyle: axisLabelStyle },
+    radar: {
+      indicator: DATA.categories.map(c => ({ name: c, max: 100 })),
+      radius: '62%',
+      center: ['50%', '52%'],
+      axisName: { color: '#1c2430', fontSize: 12 },
+      splitLine: { lineStyle: { color: '#e3e8ef' } },
+      splitArea: { areaStyle: { color: ['#ffffff', '#f8fafc'] } }
+    },
+    series: [{
+      type: 'radar',
+      areaStyle: { opacity: 0.08 },
+      symbolSize: 5,
+      data: DATA.models.map((m, i) => ({
+        name: m.name,
+        value: DATA.categories.map(c => m.by_category[c] ?? 0),
+        itemStyle: { color: PALETTE[i % PALETTE.length] },
+        lineStyle: { width: 2 }
+      }))
+    }]
+  });
+} else {
+  const el = document.getElementById('chart-radar');
+  if (el) el.innerHTML = '<p class="empty">维度少于 3 个，雷达图不适用。</p>';
+}
+
+chart('chart-passheal', {
+  title: { text: 'Pass@1 vs Heal@1', left: 'center', textStyle: { fontSize: 13, color: '#1c2430' } },
+  tooltip: { trigger: 'axis', valueFormatter: v => v + '%' },
+  legend: { bottom: 0, textStyle: axisLabelStyle },
+  grid: baseGrid,
+  xAxis: { type: 'category', data: DATA.models.map(m => m.name), axisLabel: { ...axisLabelStyle, interval: 0, rotate: DATA.models.length > 4 ? 18 : 0 } },
+  yAxis: { type: 'value', max: 100, axisLabel: { ...axisLabelStyle, formatter: '{value}%' }, splitLine: { lineStyle: { color: '#eef2f7' } } },
+  series: [
+    { name: 'Pass@1', type: 'bar', barMaxWidth: 34, itemStyle: { color: '#2f6fed', borderRadius: [4, 4, 0, 0] }, data: DATA.models.map(m => m.pass_at_1_rate) },
+    { name: 'Heal@1', type: 'bar', barMaxWidth: 34, itemStyle: { color: '#16a34a', borderRadius: [4, 4, 0, 0] }, data: DATA.models.map(m => m.heal_at_1_rate) }
+  ]
+});
+
+chart('chart-taxonomy', {
+  title: { text: '五类错误归因（首轮）', left: 'center', textStyle: { fontSize: 13, color: '#1c2430' } },
+  tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+  legend: { bottom: 0, type: 'scroll', textStyle: axisLabelStyle },
+  grid: baseGrid,
+  xAxis: { type: 'category', data: DATA.models.map(m => m.name), axisLabel: { ...axisLabelStyle, interval: 0, rotate: DATA.models.length > 4 ? 18 : 0 } },
+  yAxis: { type: 'value', axisLabel: axisLabelStyle, splitLine: { lineStyle: { color: '#eef2f7' } } },
+  series: DATA.labels.filter(l => l.failure).map((label, i) => ({
+    name: label.zh,
+    type: 'bar',
+    stack: 'errors',
+    barMaxWidth: 40,
+    itemStyle: { color: PALETTE[(i + 3) % PALETTE.length] },
+    data: DATA.models.map(m => m.error_distribution[label.key] ?? 0)
+  }))
+});
+
+if (DATA.difficulties.length >= 2) {
+  chart('chart-difficulty', {
+    title: { text: '难度递增下的通过率衰减', left: 'center', textStyle: { fontSize: 13, color: '#1c2430' } },
+    tooltip: { trigger: 'axis', valueFormatter: v => (v === null ? '—' : v + '%') },
+    legend: { bottom: 0, type: 'scroll', textStyle: axisLabelStyle },
+    grid: baseGrid,
+    xAxis: { type: 'category', name: '难度', data: DATA.difficulties.map(d => '★' + d), axisLabel: axisLabelStyle },
+    yAxis: { type: 'value', max: 100, axisLabel: { ...axisLabelStyle, formatter: '{value}%' }, splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: DATA.models.map((m, i) => ({
+      name: m.name,
+      type: 'line',
+      smooth: true,
+      symbolSize: 6,
+      connectNulls: true,
+      itemStyle: { color: PALETTE[i % PALETTE.length] },
+      data: DATA.difficulties.map(d => m.by_difficulty[d] ?? null)
+    }))
+  });
+} else {
+  const el = document.getElementById('chart-difficulty');
+  if (el) el.innerHTML = '<p class="empty">难度层级不足。</p>';
+}
+
+chart('chart-latency', {
+  title: { text: '延迟与首字时间', left: 'center', textStyle: { fontSize: 13, color: '#1c2430' } },
+  tooltip: { trigger: 'axis', valueFormatter: fmtMs },
+  legend: { bottom: 0, textStyle: axisLabelStyle },
+  grid: { ...baseGrid, top: 50 },
+  xAxis: { type: 'category', data: DATA.models.map(m => m.name), axisLabel: { ...axisLabelStyle, interval: 0, rotate: DATA.models.length > 4 ? 18 : 0 } },
+  yAxis: { type: 'value', axisLabel: { ...axisLabelStyle, formatter: v => fmtMs(v) }, splitLine: { lineStyle: { color: '#eef2f7' } } },
+  series: [
+    { name: 'P50', type: 'bar', barMaxWidth: 30, itemStyle: { color: '#2f6fed', borderRadius: [4, 4, 0, 0] }, data: DATA.models.map(m => m.p50_ms) },
+    { name: 'P95', type: 'bar', barMaxWidth: 30, itemStyle: { color: '#9333ea', borderRadius: [4, 4, 0, 0] }, data: DATA.models.map(m => m.p95_ms) },
+    { name: 'TTFT p50', type: 'bar', barMaxWidth: 30, itemStyle: { color: '#0891b2', borderRadius: [4, 4, 0, 0] }, data: DATA.models.map(m => m.ttft_p50_ms) }
+  ]
+});
+
+window.addEventListener('resize', () => charts.forEach(c => c.resize()));
+
+/* ---------- failure explorer ---------- */
+const modelFilter = document.getElementById('filter-model');
+const categoryFilter = document.getElementById('filter-category');
+const outcomeFilter = document.getElementById('filter-outcome');
+const labelFilter = document.getElementById('filter-label');
+
+const unique = key => [...new Set(DATA.failures.map(f => f[key]))].sort();
+unique('model').forEach(v => modelFilter.add(new Option(v, v)));
+unique('category').forEach(v => categoryFilter.add(new Option(v, v)));
+[...new Set(DATA.failures.map(f => f.first_label).filter(Boolean))].sort()
+  .forEach(v => labelFilter.add(new Option(LABEL_ZH[v] || v, v)));
+
+document.getElementById('failure-hint').textContent =
+  `共 ${DATA.failure_count} 条首轮失败记录（含自愈成功）；点击任意条目展开「模型实际输出 vs Schema 期望」对照`;
+
+function jsonBlock(value) {
+  const text = JSON.stringify(value, null, 2);
+  return `<pre class="mono">${esc(text)}</pre>`;
+}
+
+function attemptsHtml(caseData) {
+  return caseData.attempts.map(a => {
+    const cls = a.status === 'provider_error' ? 'fail'
+      : a.passed ? 'ok' : (LABEL_CLASS[a.label] || 'fail');
+    const title = a.status === 'provider_error'
+      ? `请求失败：${esc(a.provider_error)}`
+      : `${LABEL_ZH[a.label] || a.label} · ${a.detail}${a.detail_gloss ? '（' + a.detail_gloss + '）' : ''}`;
+    const issues = a.issues.length
+      ? `<ul class="issues">${a.issues.map(i =>
+          `<li><code>${esc(i.path)}</code> ${esc(i.message)} <span class="mono">#${esc(i.detail)}</span></li>`).join('')}</ul>`
+      : '';
+    return `<div class="round-head">
+        <span class="pill ${cls}">第 ${a.round} 轮</span>
+        <span>${title}</span>
+        <span>· ${fmtMs(a.latency_ms)}${a.ttft_ms !== null ? ' · TTFT ' + fmtMs(a.ttft_ms) : ''}</span>
+      </div>
+      ${issues}
+      <div class="pane"><h4>模型实际输出</h4><pre class="mono">${esc(a.raw) || '<span class="empty">(空响应)</span>'}</pre></div>`;
+  }).join('');
+}
+
+function groundTruthHtml(gt) {
+  const entries = Object.entries(gt || {});
+  if (!entries.length) return '';
+  return `<div class="pane"><h4>值级校验规则</h4>${jsonBlock(gt)}</div>`;
+}
+
+function renderFailures() {
+  const model = modelFilter.value;
+  const category = categoryFilter.value;
+  const outcome = outcomeFilter.value;
+  const label = labelFilter.value;
+
+  const rows = DATA.failures.filter(f =>
+    (!model || f.model === model) &&
+    (!category || f.category === category) &&
+    (!label || f.first_label === label) &&
+    (!outcome || (outcome === 'healed' ? f.healed : !f.passed_after_heal))
+  );
+
+  const list = document.getElementById('failure-list');
+  if (!rows.length) {
+    list.innerHTML = '<p class="empty">没有符合筛选条件的失败记录。</p>';
+    return;
+  }
+
+  list.innerHTML = rows.map(f => {
+    const ref = f.reference || {};
+    const cls = LABEL_CLASS[f.first_label] || 'fail';
+    const outcomePill = f.passed_after_heal
+      ? `<span class="pill healed">第 ${f.rounds} 轮自愈成功</span>`
+      : `<span class="pill fail">${f.rounds} 轮后仍失败</span>`;
+    return `<details class="case">
+      <summary>
+        <span class="case-id">${esc(f.case_id)}</span>
+        <span>${esc(f.model)}</span>
+        <span class="pill ${cls}">${esc(LABEL_ZH[f.first_label] || f.first_label || '请求失败')}</span>
+        <span class="mono">${esc(f.first_detail)}</span>
+        <span>${esc(f.category)}</span>
+        <span>${'★'.repeat(f.difficulty)}</span>
+        ${outcomePill}
+        <span style="color:#6b7684">${esc(f.title || '')}</span>
+      </summary>
+      <div class="case-body">
+        <div class="pane"><h4>发给模型的 Prompt</h4><div class="text">${esc(ref.prompt || '(报告生成时未提供数据集文件)')}</div></div>
+        <div class="pane"><h4>Schema 期望（${esc(ref.expectation || '')}）</h4>${jsonBlock(ref.expected || {})}</div>
+        ${groundTruthHtml(ref.ground_truth)}
+        <div class="pane" style="grid-column: 1 / -1"><h4>逐轮实际输出与归因</h4>${attemptsHtml(f)}</div>
+        ${ref.notes ? `<div class="pane" style="grid-column: 1 / -1"><h4>出题说明</h4><div class="text">${esc(ref.notes)}</div></div>` : ''}
+      </div>
+    </details>`;
+  }).join('');
+}
+
+[modelFilter, categoryFilter, outcomeFilter, labelFilter].forEach(el =>
+  el.addEventListener('change', renderFailures));
+document.getElementById('expand-all').addEventListener('click', () =>
+  document.querySelectorAll('#failure-list details.case').forEach(d => d.open = true));
+document.getElementById('collapse-all').addEventListener('click', () =>
+  document.querySelectorAll('#failure-list details.case').forEach(d => d.open = false));
+renderFailures();
+
+/* ---------- markdown export ---------- */
+document.getElementById('copy-md').addEventListener('click', async () => {
+  const header = '| Model | Pass@1 | Heal@1 | Repair | P50 | TTFT p50 | TPS |\n|---|---:|---:|---:|---:|---:|---:|';
+  const body = sorted.map(m =>
+    `| ${m.name} | ${fmtRate(m.pass_at_1_rate)} | ${fmtRate(m.heal_at_1_rate)} | ${fmtRate(m.repair_rate)} `
+    + `| ${fmtMs(m.p50_ms)} | ${fmtMs(m.ttft_p50_ms)} | ${m.tps ? m.tps.toFixed(1) : '—'} |`).join('\n');
+  const hint = document.getElementById('copy-hint');
+  try {
+    await navigator.clipboard.writeText(`${header}\n${body}`);
+    hint.textContent = '已复制到剪贴板';
+  } catch (err) {
+    hint.textContent = '复制失败，请手动选择表格内容';
+  }
+  setTimeout(() => { hint.textContent = ''; }, 2500);
+});
+</script>
+</body>
+</html>

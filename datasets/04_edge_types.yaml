@@ -1,0 +1,859 @@
+version: 1
+category: edge_types
+description: >
+  Probes the JSON type system itself: strict integer/number/boolean typing, the
+  difference between an explicit null and an absent key, empty containers versus
+  minItems, numeric boundaries (multipleOf, exclusive bounds, values beyond 2^53),
+  the whole format family, and const/enum/union ambiguity. Models break here
+  because they were trained on lax, human-readable data: they quote numbers,
+  answer "true" as a string or 1, invent a value where null was required,
+  collapse an empty array into an omission, and silently pick one branch of a
+  union that the ground truth forbids.
+cases:
+  - id: typ_001
+    title: money must stay a decimal string
+    tags: [string-decimal, money, integer-vs-string]
+    difficulty: 4
+    prompt: |
+      We are closing invoice INV-2024-0917. The grand total is 19.90 CNY, which is 1990 cents.
+      Translate that into the settlement payload the payment gateway expects.
+
+      Rules:
+      - `amount` is a decimal STRING with exactly two fraction digits (for example "19.90"),
+        never a JSON float.
+      - `amount_cents` is a JSON integer.
+      - `currency` must be one of CNY, USD, EUR.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        amount:
+          type: string
+          pattern: '^[0-9]+\.[0-9]{2}$'
+          # generator hint: synth.py has no dot-bearing pattern candidate, so the
+          # ideal response is seeded from this default before ground truth applies.
+          default: "19.90"
+        amount_cents:
+          type: integer
+          minimum: 0
+        currency:
+          type: string
+          enum: [CNY, USD, EUR]
+      required: [amount, amount_cents, currency]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.amount": "19.90"
+        "$.amount_cents": 1990
+        "$.currency": "CNY"
+    max_rounds: 2
+    notes: |
+      中文说明：金额必须作为字符串携带十进制精度，而模型（尤其是被 float 训练过的模型）几乎
+      总想输出 `19.90` 这个 JSON 数字，或输出 `"19.9"` 少一位小数。schema 用 pattern 强制
+      两位小数，ground truth 又把取值钉死，所以三种典型崩法都会被抓住：写成 float、写成
+      一位小数、以及把 `amount_cents` 写成字符串 `"1990"`。
+
+  - id: typ_002
+    title: integer-valued float in sensor telemetry
+    tags: [float-integer, integer-vs-string, array]
+    difficulty: 4
+    prompt: |
+      The edge gateway buffered one temperature reading from sensor rack B. Emit the telemetry
+      envelope exactly as the ingestion service expects.
+
+      - `readings` is a non-empty JSON array holding that single entry.
+      - The firmware reported the sequence number 1.0; sequence numbers are JSON integers, so
+        write it as a number (a bare 1) and never as the string "1".
+      - Reference temperature: 36.5 degrees Celsius, and the reading was healthy, so `ok` is true.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        readings:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              seq:
+                type: integer
+                minimum: 1
+              celsius:
+                type: number
+              ok:
+                type: boolean
+            required: [seq, celsius, ok]
+      required: [readings]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.readings[0].seq": 1.0
+        "$.readings[0].celsius": 36.5
+        "$.readings[0].ok": true
+    max_rounds: 2
+    notes: |
+      中文说明：JSON Schema 规定 `1.0` 这类“无小数部分的浮点”就是 integer，而 `"1"` 不是；
+      这正是小模型最容易翻车的地方——它们会把序号写成字符串。嵌套数组还额外考察一层寻址
+      （`$.readings[0].seq`），模型若擅自补出第二、第三个占位读数的结构错误也会被 schema 抓住。
+
+  - id: typ_003
+    title: event id beyond 2^53 stays an integer
+    tags: [big-integer, int64, boolean]
+    difficulty: 4
+    prompt: |
+      Archive this audit event. Use these exact values:
+      - event id: 9007199254740993 (larger than 2^53, but it is still a JSON integer -- never quote it)
+      - actor id: 42
+      - the event is not archived yet: `archived` must be the JSON boolean false.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        event_id:
+          type: integer
+          minimum: 0
+        actor_id:
+          type: integer
+          minimum: 1
+        archived:
+          type: boolean
+      required: [event_id, actor_id, archived]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.event_id": 9007199254740993
+        "$.actor_id": 42
+        "$.archived": false
+    max_rounds: 2
+    notes: |
+      中文说明：超过 2^53 的整数会被很多模型“顺手”写成字符串（怕精度丢失），或者退化成
+      科学计数法 `9.007199254740992e+15`（高位直接丢 1）。schema 要求 integer 且 ground
+      truth 钉死原值，两条路都被堵死；`archived: false` 则顺带考察布尔值不能写成 0。
+
+  - id: typ_004
+    title: boolean traps on a feature flag
+    tags: [boolean-trap, single-value-enum, feature-flag]
+    difficulty: 3
+    prompt: |
+      Roll out the checkout_v2 feature flag. Fill in the config payload:
+      - the flag name is exactly checkout_v2
+      - `enabled` must be the JSON boolean true -- not the string "true", not 1, not "yes"
+      - `rollout_percent` must be the JSON integer 25 (a number, not a string)
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        flag:
+          type: string
+          enum: [checkout_v2]
+        enabled:
+          type: boolean
+        rollout_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+      required: [flag, enabled, rollout_percent]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.flag": "checkout_v2"
+        "$.enabled": true
+        "$.rollout_percent": 25
+    max_rounds: 2
+    notes: |
+      中文说明：布尔陷阱的经典组合。Pydantic 严格模式会拒绝 `"true"`、`"yes"`、`1` 和 `0`，
+      所以任何“用人类语言表达开关”的输出都会被判为类型不匹配；单值 enum 同时考察模型会不会
+      自己发明 `checkout_v3` 之类的旗标名。
+
+  - id: typ_005
+    title: required but nullable deletion timestamp
+    tags: [required-null, strict-null, user-registration]
+    difficulty: 4
+    prompt: |
+      Register this user. The form gave us:
+      - username: lin_wei
+      - login_count: 0 (they have never signed in)
+      - active: false -- the account was deactivated right after creation
+      - deleted_at: we do not know the deletion timestamp yet, but the field is REQUIRED by the
+        API contract, so emit it as JSON null -- not "null", not an empty string, and do not
+        omit the key.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 20
+        deleted_at:
+          type: ["string", "null"]
+          format: date-time
+        active:
+          type: boolean
+        login_count:
+          type: integer
+          minimum: 0
+      required: [username, deleted_at, active, login_count]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.username": "lin_wei"
+        "$.active": false
+        "$.login_count": 0
+      must_be_null: ["$.deleted_at"]
+    max_rounds: 2
+    notes: |
+      中文说明：必填但可空（`["string","null"]`）的字段。普通 `{"type":"string"}` 会拒绝显式
+      null，所以作者必须写成类型数组；模型那边常见的崩法是省略该键、输出字符串 `"null"`、
+      或者干脆编造一个时间戳。ground truth 的 must_be_null 只认真正的 JSON null。
+
+  - id: typ_006
+    title: optional nullable field must be omitted, not sent as null
+    tags: [optional-nullable, absent-vs-null, format-email]
+    difficulty: 4
+    prompt: |
+      Create the account for ada@example.com.
+      - email: ada@example.com
+      - age: 36
+      - terms_accepted: true (they ticked the box)
+      - referral_code: the signup was organic, so this field must be OMITTED ENTIRELY from the
+        JSON object -- do not send null and do not invent a code.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+        referral_code:
+          type: ["string", "null"]
+        age:
+          type: integer
+          minimum: 13
+          maximum: 130
+        terms_accepted:
+          type: boolean
+      required: [email, age, terms_accepted]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.email": "ada@example.com"
+        "$.age": 36
+        "$.terms_accepted": true
+      forbidden_paths: ["$.referral_code"]
+    max_rounds: 2
+    notes: |
+      中文说明：与 typ_005 正好互补——同一个「可空」类型，必填时要输出显式 null，选填时却要
+      整个键都不出现。模型极难区分这两种语义，通常会统一填 null（被 forbidden_paths 抓住）
+      或统一塞一个假值。
+
+  - id: typ_007
+    title: empty array versus an array with one element
+    tags: [empty-array, minItems-zero, zero-value]
+    difficulty: 3
+    prompt: |
+      Log this search request. The user typed "invoice" and nothing matched, so `tags` must be an
+      empty JSON array [] (the endpoint explicitly allows zero tags) and `total` must be the
+      integer 0.
+
+      The spelling engine still offers one suggestion, "invoices", so `suggestions` holds exactly
+      that single string -- its schema declares no minimum, but the user really did get one
+      suggestion.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+          minLength: 1
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 5
+          items:
+            type: string
+            maxLength: 32
+        suggestions:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            maxLength: 32
+        total:
+          type: integer
+          minimum: 0
+      required: [query, tags, suggestions, total]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.query": "invoice"
+        "$.tags": []
+        "$.total": 0
+        "$.suggestions[0]": "invoices"
+    max_rounds: 2
+    notes: |
+      中文说明：这里把「显式 minItems: 0」与「完全不写 minItems」放在同一张 schema 里对比：
+      前者允许 `[]`，后者默认同样允许 `[]`（默认就是 0），但业务事实要求恰好一个元素。模型
+      常见的崩法是把空数组整个删掉，或为了“安全”塞一个占位字符串进 tags。
+
+  - id: typ_008
+    title: booking window with exactly one slot
+    tags: [maxItems, single-element, array-of-objects]
+    difficulty: 3
+    prompt: |
+      Confirm booking window BW-4471 for tomorrow morning. It has exactly ONE slot: the hour
+      starting at 9 (09:00) is available true. `slots` is capped at two entries, so do not add a
+      second placeholder slot.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        window_id:
+          type: string
+          pattern: '^[A-Z]{2}-[0-9]{4}$'
+        slots:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              start_hour:
+                type: integer
+                minimum: 0
+                maximum: 23
+              available:
+                type: boolean
+            required: [start_hour, available]
+      required: [window_id, slots]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.window_id": "BW-4471"
+        "$.slots[0].start_hour": 9
+        "$.slots[0].available": true
+    max_rounds: 2
+    notes: |
+      中文说明：单元素数组。模型在“数组字段”上常有补齐倾向：要么硬凑第二个 slot，要么把
+      唯一元素写成裸对象而丢掉数组外壳。编号 pattern 同时考察正则格式（`BW-4471` 必须两位
+      大写字母加四位数字）。
+
+  - id: typ_009
+    title: cents that must be multiples of five
+    tags: [multipleOf, money, arithmetic]
+    difficulty: 4
+    prompt: |
+      Recompute this order total in integer cents. The payment API only accepts amounts that are
+      multiples of 5 cents.
+
+      - unit price: 1990 cents
+      - quantity: 3
+      - discount: 250 cents
+      - `total_cents`: the order system reports the total as 5720 cents -- check that against
+        1990 x 3 - 250 and report that same number in the payload
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        unit_price_cents:
+          type: integer
+          minimum: 0
+          multipleOf: 5
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 99
+        discount_cents:
+          type: integer
+          minimum: 0
+          multipleOf: 5
+        total_cents:
+          type: integer
+          minimum: 0
+          multipleOf: 5
+      required: [unit_price_cents, quantity, discount_cents, total_cents]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.unit_price_cents": 1990
+        "$.quantity": 3
+        "$.discount_cents": 250
+        "$.total_cents": 5720
+    max_rounds: 2
+    notes: |
+      中文说明：考察 multipleOf（金额只能以 5 分为步长）加上一次真实的算术推导：
+      1990 × 3 − 250 = 5720。模型若只“抄数字”不计算，会输出 5970 或 6220，被 ground truth
+      直接抓住；把金额写成 `"19.90"` 那种带小数的字符串也会违反 multipleOf 约束。
+
+  - id: typ_010
+    title: exclusive bounds and the zero boundary
+    tags: [exclusive-bounds, number-vs-integer, zero]
+    difficulty: 4
+    prompt: |
+      Log the extraction confidence for this document:
+      - confidence: 0.85 (a JSON number; the schema allows anything from 0 up to but NOT including 1.0)
+      - retry_count: 0 (the call succeeded on the first attempt)
+      - accepted: true
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        confidence:
+          type: number
+          minimum: 0
+          exclusiveMaximum: 1
+        retry_count:
+          type: integer
+          exclusiveMinimum: -1
+          maximum: 5
+        accepted:
+          type: boolean
+      required: [confidence, retry_count, accepted]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.confidence": 0.85
+        "$.retry_count": 0
+        "$.accepted": true
+    max_rounds: 2
+    notes: |
+      中文说明：排他边界容易和闭区间混淆——0 合法而 1.0 非法，-1 非法而 0 合法（exclusiveMinimum
+      为 -1）。此外 `retry_count` 是 integer，写 0.5 或 `"0"` 都会失败；confidence 是 number，
+      整数 1 会被接受为数值但被上界挡住，这正好测出模型有没有读边界。
+
+  - id: typ_011
+    title: uuid, date-time, duration and date in one plan
+    tags: [format-uuid, format-date-time, format-duration, format-date]
+    difficulty: 4
+    prompt: |
+      Create the subscription plan payload:
+      - plan_id: 3f2504e0-4f89-11d3-9a0c-0305e82c3301 (a UUID)
+      - starts_at: 2025-03-01T00:00:00Z (RFC 3339 date-time)
+      - trial: P14D (ISO 8601 duration)
+      - billing_day: 2025-03-01 (date only, no time part)
+      - grace: false -- this plan has no grace period
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        plan_id:
+          type: string
+          format: uuid
+        starts_at:
+          type: string
+          format: date-time
+        trial:
+          type: string
+          format: duration
+        billing_day:
+          type: string
+          format: date
+        grace:
+          type: boolean
+      required: [plan_id, starts_at, trial, billing_day, grace]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.plan_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+        "$.starts_at": "2025-03-01T00:00:00Z"
+        "$.trial": "P14D"
+        "$.billing_day": "2025-03-01"
+        "$.grace": false
+    max_rounds: 2
+    notes: |
+      中文说明：一次考察四种 format。模型最常把日期写成 `2025-03-01 00:00:00`（缺 T 和时区）、
+      把 duration 写成 `14 days`、把 date 补成 date-time。每种都会在编译期被 format 校验器
+      （datetime/date 类型 + duration 正则）判为格式违规。
+
+  - id: typ_012
+    title: network identifiers for device provisioning
+    tags: [format-ipv4, format-ipv6, hostname, pattern]
+    difficulty: 4
+    prompt: |
+      Provision device BK-4471:
+      - device_sn: BK-4471
+      - ipv4: 10.0.0.7
+      - ipv6: 2001:db8::1
+      - host: sensor-01.example.com (a DNS hostname)
+      - provisioned: false -- provisioning has not run yet
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        device_sn:
+          type: string
+          pattern: '^[A-Z]{2}-[0-9]{4}$'
+        ipv4:
+          type: string
+          format: ipv4
+        ipv6:
+          type: string
+          format: ipv6
+        host:
+          type: string
+          pattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$'
+        provisioned:
+          type: boolean
+      required: [device_sn, ipv4, ipv6, host, provisioned]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.device_sn": "BK-4471"
+        "$.ipv4": "10.0.0.7"
+        "$.ipv6": "2001:db8::1"
+        "$.host": "sensor-01.example.com"
+        "$.provisioned": false
+    max_rounds: 2
+    notes: |
+      中文说明：IPv4 与 IPv6 的形状差异极大（模型常把 IPv6 写成 `2001:db8:0:0:0:0:0:1` 的
+      展开形式——这仍然合法，但被 ground truth 钉死为压缩形式），hostname 则考察带连字符的
+      多标签域名。注意本项目的 `format: hostname` 内置正则含 lookahead，会被 pydantic-core 的
+      Rust 正则引擎拒绝，因此这里用等价的显式 pattern 表达同一约束。
+
+  - id: typ_013
+    title: email, time and JSON Pointer delivery config
+    tags: [format-email, format-time, format-json-pointer]
+    difficulty: 3
+    prompt: |
+      Configure notification delivery for the ops team:
+      - contact_email: ops@example.com
+      - quiet_hours_start: 22:30:00 (ISO 8601 time, with seconds)
+      - notify_path: /notification/email (RFC 6901 JSON Pointer into the event body)
+      - verified: false -- the address is not confirmed yet
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        contact_email:
+          type: string
+          format: email
+        quiet_hours_start:
+          type: string
+          format: time
+        notify_path:
+          type: string
+          format: json-pointer
+        verified:
+          type: boolean
+      required: [contact_email, quiet_hours_start, notify_path, verified]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.contact_email": "ops@example.com"
+        "$.quiet_hours_start": "22:30:00"
+        "$.notify_path": "/notification/email"
+        "$.verified": false
+    max_rounds: 2
+    notes: |
+      中文说明：三种易混格式。time 必须带秒（`22:30` 会被 `time.fromisoformat` 接受，但 ground
+      truth 钉死了秒），JSON Pointer 必须以 `/` 开头（模型常写成点号路径 `notification.email`），
+      email 则考察把显示名 `Ops <ops@example.com>` 整段塞进字段的幻觉。
+
+  - id: typ_014
+    title: const version and a single-value enum
+    tags: [const, single-value-enum, tax-record]
+    difficulty: 2
+    prompt: |
+      Finalise the tax record header. The schema snapshot pinned to this filing is 2025-01-15 and
+      the only legal status is approved. Fill in:
+      - schema_version: "2025-01-15" (the exact constant; no other version is accepted)
+      - status: approved
+      - reviewed: true
+      - reviewer_count: 2
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        schema_version:
+          const: "2025-01-15"
+        status:
+          enum: [approved]
+        reviewed:
+          type: boolean
+        reviewer_count:
+          type: integer
+          minimum: 0
+      required: [schema_version, status, reviewed, reviewer_count]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.schema_version": "2025-01-15"
+        "$.status": "approved"
+        "$.reviewed": true
+        "$.reviewer_count": 2
+    max_rounds: 2
+    notes: |
+      中文说明：`const` 与单值 `enum` 在校验层都编译成 Literal，因此“只有一个合法取值”这件事
+      对模型是纯粹的记忆题：它必须原样复制常量，而不是把 `status` 写成 `APPROVED`（大写）、
+      `approved `（带空格）或 `schema_version` 写成日期对象。
+
+  - id: typ_015
+    title: a union that accepts both, a record that needs the number
+    tags: [anyOf, union-ambiguity, integer-vs-string]
+    difficulty: 5
+    prompt: |
+      Migrate this user record into the new CRM. The legacy system stores ids as either a number
+      or a string, so the schema for `legacy_id` accepts both -- but this particular record's id
+      is the NUMBER 4471, so emit it without quotes.
+
+      - legacy_id: 4471
+      - channel: web
+      - synced: true
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        legacy_id:
+          anyOf:
+            - type: integer
+            - type: string
+        channel:
+          type: string
+          enum: [web, mobile, api]
+        synced:
+          type: boolean
+      required: [legacy_id, channel, synced]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.legacy_id": 4471
+        "$.channel": "web"
+        "$.synced": true
+    max_rounds: 2
+    notes: |
+      中文说明：联合类型制造的“歧义陷阱”。`anyOf: [integer, string]` 让 `4471` 和 `"4471"`
+      都能通过 schema 校验，因此只有 ground truth 能区分二者——这正是纯结构校验的死角，
+      也是本基准强调“值级断言”的原因。模型看到宽松的联合类型就会随手加引号。
+
+  - id: typ_016
+    title: negative temperatures and number versus integer
+    tags: [negative-number, number-vs-integer, sensor]
+    difficulty: 4
+    prompt: |
+      Cold-chain telemetry from sensor BK-4471:
+      - sensor_id: BK-4471
+      - temp_c: -12.5 (a decimal number; negative values are normal inside a freezer)
+      - sample_count: 1 (exactly one sample was taken)
+      - fault: true -- the freezer drifted above its safe threshold
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        sensor_id:
+          type: string
+          pattern: '^[A-Z]{2}-[0-9]{4}$'
+        temp_c:
+          type: number
+          minimum: -50
+          maximum: 60
+        sample_count:
+          type: integer
+          minimum: 0
+        fault:
+          type: boolean
+      required: [sensor_id, temp_c, sample_count, fault]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.sensor_id": "BK-4471"
+        "$.temp_c": -12.5
+        "$.sample_count": 1
+        "$.fault": true
+    max_rounds: 2
+    notes: |
+      中文说明：负数配合 `number` 与 `integer` 的分工。`temp_c` 是 number（接受整数与小数），
+      `sample_count` 是 integer（拒绝 1.5 和 `"1"`）；模型常见的崩法是把负数包进字符串
+      `"-12.5"`，或者给整数计数字段补上 `.0` 之后再自己加引号。
+
+  - id: typ_017
+    title: required empty object metadata
+    tags: [empty-object, no-properties, const-shape]
+    difficulty: 5
+    prompt: |
+      Seal this audit record. The record has no custom attributes at all, and the API contract
+      requires the `metadata` field to be present as an empty JSON object {} -- not null, not
+      omitted, and with no keys inside.
+
+      - record_id: "8675309" (a seven digit string, keep the quotes)
+      - metadata: {}
+      - sealed: false
+      - revision: 1
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        record_id:
+          type: string
+          pattern: '^[0-9]{7}$'
+        metadata:
+          type: object
+          additionalProperties: false
+          properties: {}
+        sealed:
+          type: boolean
+        revision:
+          type: integer
+          minimum: 1
+      required: [record_id, metadata, sealed, revision]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.record_id": "8675309"
+        "$.metadata": {}
+        "$.sealed": false
+        "$.revision": 1
+    max_rounds: 2
+    notes: |
+      中文说明：“空对象”是被模型当作噪声的取值。它要么被省略，要么被填成 null，要么被塞进
+      `{"note": ""}` 之类的占位键。schema 用 `properties: {}` + `additionalProperties: false`
+      精确表达“只能为空”，任何多余键都会以 extra_forbidden 失败；同时 record_id 要求是七位
+      数字的字符串，考察模型会不会把它当成整数输出。
+
+  - id: typ_018
+    title: a one-character region code
+    tags: [maxLength-one, length-bounds, single-character]
+    difficulty: 3
+    prompt: |
+      Normalise the site descriptor for our East China deployment:
+      - region: "E" -- exactly one character (the schema caps it at 1)
+      - country: "CN" -- a two-letter uppercase code
+      - display_name: "East China"
+      - site_count: 7
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        region:
+          type: string
+          minLength: 1
+          maxLength: 1
+        country:
+          type: string
+          pattern: '^[A-Z]{2}$'
+        display_name:
+          type: string
+          minLength: 3
+          maxLength: 12
+        site_count:
+          type: integer
+          minimum: 1
+          maximum: 99
+      required: [region, country, display_name, site_count]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.region": "E"
+        "$.country": "CN"
+        "$.display_name": "East China"
+        "$.site_count": 7
+    max_rounds: 2
+    notes: |
+      中文说明：`maxLength: 1` 的字段是最反直觉的一类约束——模型看到 region 就会写
+      `"East China"` 或 `"east"`。同时考察下界：display_name 至少 3 个字符，所以模型不能
+      把它压成 `"EC"`，两端边界一起测。
+
+  - id: typ_019
+    title: pagination envelope with no convenience fields
+    tags: [additionalProperties, no-extra-fields, pagination]
+    difficulty: 2
+    prompt: |
+      Return the pagination envelope for page 2 of the users listing. `page_size` is 50, there
+      are 4 pages in total, and a next page exists (`has_next` is true).
+
+      Only the four declared fields are allowed: page, page_size, total_pages, has_next. Do not
+      add items, next_url, total or message -- even though our older endpoints returned them.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+        total_pages:
+          type: integer
+          minimum: 0
+        has_next:
+          type: boolean
+      required: [page, page_size, total_pages, has_next]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.page": 2
+        "$.page_size": 50
+        "$.total_pages": 4
+        "$.has_next": true
+    max_rounds: 2
+    notes: |
+      中文说明：`additionalProperties: false` 专门抓“顺手加字段”的幻觉：模型见过太多分页响应，
+      会自动补上 items、total、next_url。只要多一个键，extra_forbidden 就会把它归到
+      Enum_Or_Value_Hallucination（参数幻觉）而不是类型错误。
+
+  - id: typ_020
+    title: audit log mixing booleans, integers and a constant
+    tags: [boolean-trap, integer-vs-string, const, zero]
+    difficulty: 3
+    prompt: |
+      Write the audit entry for a successful login by user 100045 that completed in 0 milliseconds:
+      - action: login
+      - actor_uid: 100045 (a JSON integer, never the string "100045")
+      - success: true (the JSON boolean, not 1 and not "yes")
+      - duration_ms: 0
+      - severity: info (the constant this logger always emits)
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+          enum: [login, logout, export]
+        actor_uid:
+          type: integer
+          minimum: 1
+        success:
+          type: boolean
+        duration_ms:
+          type: integer
+          minimum: 0
+        severity:
+          const: info
+      required: [action, actor_uid, success, duration_ms, severity]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.action": "login"
+        "$.actor_uid": 100045
+        "$.success": true
+        "$.duration_ms": 0
+        "$.severity": "info"
+    max_rounds: 2
+    notes: |
+      中文说明：审计日志场景把三类陷阱叠在一起：布尔开关（拒绝 `1`/`"true"`/`"yes"`）、
+      用户 ID（拒绝 `"100045"`）、以及 0 这个容易被当成“空值”而改写成 null 的整数。
+      severity 的 const 还考察模型会不会自作主张提升为 `warning`。

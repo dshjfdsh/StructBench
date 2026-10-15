@@ -1,0 +1,1277 @@
+version: 1
+category: deep_nesting
+description: >
+  Probes whether a model can emit JSON that survives JSON-exact validation of deeply
+  nested, strictly typed schemas: objects at depth four or more, anyOf/oneOf unions,
+  enum and const pinning, pattern and format constraints, nullable type arrays,
+  arrays of objects with item bounds, allOf composition, $defs references and
+  numeric/string/array limits. Models break here because they were trained on lax
+  data: they quote integers, drop a required branch, invent an enum member, write
+  null into a field that never declared null, omit a nested object layer, or add one
+  helpful extra key that the schema forbids.
+cases:
+  # ------------------------------------------------------------------ dn_001 --
+  - id: dn_001
+    title: Nested order with nullable audit field
+    tags: [nesting, nullable, integer]
+    difficulty: 4
+    prompt: |
+      Our billing service needs this order normalised before it reaches the ledger.
+      Reply with the normalised payload as raw JSON only, no commentary.
+
+      Order facts:
+      - order id 8675309, status paid
+      - customer 4412, contact email ada@example.com
+      - the customer's phone number was never collected, so it must be null
+      - this customer was hard-deleted from the legacy CRM, so deleted_at must be null
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        order:
+          type: object
+          additionalProperties: false
+          properties:
+            id: {type: integer}
+            status: {type: string, enum: [pending, paid, shipped, cancelled]}
+            customer:
+              type: object
+              additionalProperties: false
+              properties:
+                id: {type: integer}
+                contact:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    email: {type: string, format: email}
+                    phone: {type: ["string", "null"]}
+                  required: [email, phone]
+                deleted_at: {type: ["string", "null"]}
+              required: [id, contact, deleted_at]
+          required: [id, status, customer]
+      required: [order]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.order.id": 8675309
+        "$.order.customer.id": 4412
+      must_be_null:
+        - "$.order.customer.contact.phone"
+        - "$.order.customer.deleted_at"
+    max_rounds: 2
+    notes: |
+      中文说明：四层嵌套（order → customer → contact → email）本身不难，难的是两个"必须显式
+      null"的字段。模型倾向于(a)直接省略 phone / deleted_at（因为"没有值"），(b)编造一个
+      空字符串 `""` 或 `"unknown"`。类型数组 ["string","null"] 配合 must_be_null 把这两种
+      偷懒方式都判死；同时 additionalProperties:false 会抓住模型顺手加上的 `$schema`、
+      `currency` 之类的"好心字段"。
+
+  # ------------------------------------------------------------------ dn_002 --
+  - id: dn_002
+    title: anyOf shipping destination union
+    tags: [union, anyOf, nesting]
+    difficulty: 4
+    prompt: |
+      The fulfilment API wants the shipment block as raw JSON only.
+
+      The parcel ships from our Oakland warehouse to 500 Market St, San Francisco, CA 94105.
+      That is a domestic (US) destination, so use the domestic destination shape and put the
+      two-letter state code in state_code.
+      Do not buy insurance: insurance_required must be false.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        shipment:
+          type: object
+          additionalProperties: false
+          properties:
+            destination:
+              anyOf:
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: domestic}
+                    state_code: {type: string, pattern: "^[A-Z]{2}$"}
+                  required: [kind, state_code]
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: international}
+                    country_code: {type: string, pattern: "^[A-Z]{2}$"}
+                    customs_value: {type: number, exclusiveMinimum: 0}
+                  required: [kind, country_code, customs_value]
+            insurance_required: {type: boolean}
+          required: [destination, insurance_required]
+      required: [shipment]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.shipment.destination.state_code": "CA"
+        "$.shipment.insurance_required": false
+    max_rounds: 2
+    notes: |
+      中文说明：anyOf 两个分支都叫 kind，模型很容易"缝合"：把 domestic 和 country_code
+      混在一起，或者给 domestic 分支补上一个 customs_value。两个分支都写了
+      additionalProperties:false，所以缝合体一定被拒。must_equal 钉死 state_code="CA"，
+      一旦模型选了国际分支就会直接报"字段缺失"。
+
+  # ------------------------------------------------------------------ dn_003 --
+  - id: dn_003
+    title: CI pipeline stage enum typing
+    tags: [enum, array, minItems]
+    difficulty: 3
+    prompt: |
+      Turn our CI intent into the pipeline config object. Raw JSON only.
+
+      Pipeline name "nightly-build", triggered on pull_request. It has two stages,
+      "compile" and "package". Both stages use on_failure "retry" with retries 3.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        pipeline:
+          type: object
+          additionalProperties: false
+          properties:
+            name: {type: string, minLength: 3, maxLength: 40}
+            trigger: {type: string, enum: [push, pull_request, schedule, manual]}
+            stages:
+              type: array
+              minItems: 2
+              maxItems: 5
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  name: {type: string, minLength: 1}
+                  on_failure: {type: string, enum: [continue, fail, retry]}
+                  retries: {type: integer, minimum: 0, maximum: 5}
+                required: [name, on_failure, retries]
+          required: [name, trigger, stages]
+      required: [pipeline]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.pipeline.name": "nightly-build"
+        "$.pipeline.trigger": "pull_request"
+        "$.pipeline.stages[0].retries": 3
+        "$.pipeline.stages[0].on_failure": "retry"
+    max_rounds: 2
+    notes: |
+      中文说明：枚举加数组的组合专抓"自创枚举值"——常见崩法是写 `"on_failure": "retry-failed"`
+      或 `"trigger": "pull-request"`（连字符而不是下划线）。retries 是整数，模型有时输出
+      `"3"`；minItems=2 则抓住只写一个 stage 的偷懒输出。
+
+  # ------------------------------------------------------------------ dn_004 --
+  - id: dn_004
+    title: CloudEvent envelope const and refs
+    tags: [const, allOf, refs]
+    difficulty: 3
+    prompt: |
+      Wrap this billing event in our CloudEvents envelope and return raw JSON.
+
+      specversion must be "1.0"; the event type is "invoice.created"; amount_cents is 1250.
+      The source is "billing.acme.internal" and the event id is
+      3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+    target_schema:
+      $defs:
+        meta:
+          type: object
+          additionalProperties: false
+          properties:
+            specversion: {const: "1.0"}
+            source: {type: string, minLength: 3}
+            id: {type: string, format: uuid}
+          required: [specversion, source, id]
+      type: object
+      additionalProperties: false
+      properties:
+        envelope:
+          allOf:
+            - $ref: "#/$defs/meta"
+            - type: object
+              additionalProperties: false
+              properties:
+                type: {const: "invoice.created"}
+                amount_cents: {type: integer, minimum: 1}
+              required: [type, amount_cents]
+      required: [envelope]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.envelope.specversion": "1.0"
+        "$.envelope.type": "invoice.created"
+        "$.envelope.amount_cents": 1250
+        "$.envelope.id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+    max_rounds: 2
+    notes: |
+      中文说明：allOf + $ref 的组合让模型必须在同一个对象里"拼"出两个来源的字段。典型崩法：
+      把 allOf 当成嵌套键写成 `{"allOf": [...]}`，或只满足第二段而漏掉 $ref 里的 specversion。
+      const 又逼模型照抄字面量，写 "1.0.0" 或 "Invoice.Created" 都会当场失败。
+
+  # ------------------------------------------------------------------ dn_005 --
+  - id: dn_005
+    title: Invoice code pattern and timestamps
+    tags: [pattern, format, nullable]
+    difficulty: 4
+    prompt: |
+      Extract the invoice header from this email and reply with raw JSON only.
+
+      Invoice number BK-4471 was issued at 2024-01-02T03:04:05Z and payment is due 2024-03-04.
+      Billed engineering hours: 7.5 (billing granularity is a quarter of an hour).
+      Trace id 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+      The client never sent a purchase order, so po_reference must be null.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        invoice:
+          type: object
+          additionalProperties: false
+          properties:
+            number: {type: string, pattern: "^[A-Z]{2}-[0-9]{4}$"}
+            issued_at: {type: string, format: date-time}
+            due_date: {type: string, format: date}
+            trace_id: {type: string, format: uuid}
+            hours: {type: number, exclusiveMinimum: 0, maximum: 24, multipleOf: 0.25}
+            po_reference: {type: ["string", "null"]}
+          required: [number, issued_at, due_date, trace_id, hours, po_reference]
+      required: [invoice]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.invoice.number": "BK-4471"
+        "$.invoice.hours": 7.5
+      must_be_null:
+        - "$.invoice.po_reference"
+      must_match:
+        "$.invoice.number": "^[A-Z]{2}-[0-9]{4}$"
+    max_rounds: 2
+    notes: |
+      中文说明：pattern + format + multipleOf 三件套。模型常把日期写成 "2024/01/02" 或
+      "Jan 2, 2024"（format 直接失败），把 hours 写成 `"7.5"` 字符串（严格模式下 float 拒收
+      字符串）。multipleOf 0.25 抓"顺手四舍五入成 7.3"的行为，po_reference 则抓"编造一个
+      PO 号"的幻觉。
+
+  # ------------------------------------------------------------------ dn_006 --
+  - id: dn_006
+    title: Explicit nulls for unknown intake
+    tags: [nullable, null-value, enum]
+    difficulty: 3
+    prompt: |
+      Log this walk-in intake from the paper form. Reply with raw JSON only; every field
+      listed by the schema is required.
+
+      Patient 55123, and the consent form is signed (true).
+      Blood type was not on file, allergies were never documented, and there is no previous
+      visit on record. For each of those three, output an explicit null instead of guessing
+      a value or omitting the field.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        intake:
+          type: object
+          additionalProperties: false
+          properties:
+            patient_id: {type: integer, minimum: 1}
+            blood_type:
+              type: ["string", "null"]
+              enum: ["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-", null]
+            allergies: {type: ["string", "null"]}
+            last_visit: {type: ["string", "null"], format: date}
+            consent_signed: {type: boolean}
+          required: [patient_id, blood_type, allergies, last_visit, consent_signed]
+      required: [intake]
+    expect:
+      behaviour: null_value
+    ground_truth:
+      must_equal:
+        "$.intake.patient_id": 55123
+        "$.intake.consent_signed": true
+      must_be_null:
+        - "$.intake.blood_type"
+        - "$.intake.allergies"
+        - "$.intake.last_visit"
+    max_rounds: 2
+    notes: |
+      中文说明："不确定就写 null"是结构化输出里最反直觉的要求。模型会本能地挑一个最可能的
+      血型、写 "none" / "" / "N/A"、或干脆省略字段。枚举里显式包含 null、类型数组写成
+      ["string","null"]，再叠加 must_be_null，任何"编造"或"省略"都被判失败；last_visit
+      还要求 null 而不是 "1970-01-01" 这类哨兵日期。
+
+  # ------------------------------------------------------------------ dn_007 --
+  - id: dn_007
+    title: Bounded line-item array payload
+    tags: [array, minItems, maxItems]
+    difficulty: 4
+    prompt: |
+      Our order service needs the line items as raw JSON.
+
+      This order is a split shipment, so the same product is listed twice: sku "1001",
+      quantity 3, unit price 24.99, and each entry carries one 10 percent discount whose
+      reason is "loyalty".
+      The order has no tags at all, so tags must be an empty array, not an omitted key.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        order:
+          type: object
+          additionalProperties: false
+          properties:
+            currency: {type: string, const: USD}
+            tags:
+              type: array
+              maxItems: 3
+              items: {type: string, minLength: 1, maxLength: 30}
+            line_items:
+              type: array
+              minItems: 2
+              maxItems: 4
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  sku: {type: string, pattern: "^[0-9]{4}$"}
+                  qty: {type: integer, minimum: 1, maximum: 99}
+                  unit_price: {type: number, exclusiveMinimum: 0, maximum: 1000000}
+                  discounts:
+                    type: array
+                    maxItems: 2
+                    items:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        percent: {type: integer, minimum: 1, maximum: 100}
+                        reason: {type: string, enum: [loyalty, seasonal, coupon, bulk]}
+                      required: [percent, reason]
+                required: [sku, qty, unit_price, discounts]
+          required: [currency, tags, line_items]
+      required: [order]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.order.line_items[0].sku": "1001"
+        "$.order.line_items[0].qty": 3
+        "$.order.line_items[0].unit_price": 24.99
+        "$.order.line_items[0].discounts[0].percent": 10
+        "$.order.line_items[0].discounts[0].reason": "loyalty"
+        "$.order.tags": []
+    max_rounds: 3
+    notes: |
+      中文说明：三层嵌套数组（order → line_items[] → discounts[]）。考点是"空数组"与"越界"：
+      模型对"没有标签"通常直接省略 tags 键（required 会抓住），而 unit_price 这类金额
+      字段最容易被引号化成字符串 "24.99" 或写成分单位整数 2499。sku 的 pattern
+      ^[0-9]{4}$ 又要求它必须是"四位数字的字符串"，写成整数 1001 同样失败。
+
+  # ------------------------------------------------------------------ dn_008 --
+  - id: dn_008
+    title: allOf postal address composition
+    tags: [allOf, refs, pattern]
+    difficulty: 4
+    prompt: |
+      Normalise the seller block for the tax engine. Raw JSON only.
+
+      Legal name "Northwind Traders".
+      Registered address: house_number 221, "1 Harbor Way", San Francisco, postal code 94107,
+      region CA, country US.
+    target_schema:
+      $defs:
+        postal:
+          type: object
+          additionalProperties: false
+          properties:
+            line1: {type: string, minLength: 3, maxLength: 60}
+            house_number: {type: integer, minimum: 1}
+            city: {type: string, minLength: 2}
+            postal_code: {type: string, pattern: "^[0-9]{5}$"}
+          required: [line1, house_number, city, postal_code]
+      type: object
+      additionalProperties: false
+      properties:
+        seller:
+          type: object
+          additionalProperties: false
+          properties:
+            legal_name: {type: string, minLength: 2}
+            registered_address:
+              allOf:
+                - $ref: "#/$defs/postal"
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    region: {type: string, pattern: "^[A-Z]{2}$"}
+                    country: {const: US}
+                  required: [region, country]
+          required: [legal_name, registered_address]
+      required: [seller]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.seller.legal_name": "Northwind Traders"
+        "$.seller.registered_address.house_number": 221
+        "$.seller.registered_address.postal_code": "94107"
+        "$.seller.registered_address.region": "CA"
+        "$.seller.registered_address.country": "US"
+    max_rounds: 3
+    notes: |
+      中文说明：地址被拆成 $defs.postal + 内联 allOf 两段，模型必须在同一层里同时满足两边
+      的 required。常见崩法是把 allOf 当成"嵌套对象"多包一层，或者把 region 写成
+      "California"（pattern 要求两位大写字母）。postal_code 必须是 5 位数字字符串，
+      写成整数 94107 会被严格类型拒收。
+
+  # ------------------------------------------------------------------ dn_009 --
+  - id: dn_009
+    title: Instalment plan numeric bounds
+    tags: [numbers, bounds, multipleOf]
+    difficulty: 4
+    prompt: |
+      Quote the instalment plan as raw JSON.
+
+      - 6 monthly instalments (the count must be an even number)
+      - 7.5 percent APR
+      - principal 250000 cents
+      - 10000 cents down payment
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        plan:
+          type: object
+          additionalProperties: false
+          properties:
+            installments: {type: integer, minimum: 2, maximum: 24, multipleOf: 2}
+            apr_percent: {type: number, exclusiveMinimum: 0, exclusiveMaximum: 40, multipleOf: 0.25}
+            principal_cents: {type: integer, exclusiveMinimum: 100000}
+            down_payment: {type: number, minimum: 0, maximum: 50000}
+          required: [installments, apr_percent, principal_cents, down_payment]
+      required: [plan]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.plan.installments": 6
+        "$.plan.apr_percent": 7.5
+        "$.plan.principal_cents": 250000
+        "$.plan.down_payment": 10000
+    max_rounds: 2
+    notes: |
+      中文说明：四个数值字段，四道边界。installments 必须同时满足 minimum 2、maximum 24、
+      multipleOf 2（写 5 会失败）；apr_percent 是 exclusiveMinimum 0（写 0 失败）且
+      multipleOf 0.25（写 7.4 失败）；principal_cents 是 exclusiveMinimum 100000（写
+      100000 失败，这是"边界含不含"的经典陷阱）；模型还常把金额写成字符串或带货币符号。
+
+  # ------------------------------------------------------------------ dn_010 --
+  - id: dn_010
+    title: Five-level CI pipeline config
+    tags: [nesting, depth, ci]
+    difficulty: 5
+    prompt: |
+      Emit the generated CI pipeline config as raw JSON only.
+
+      Pipeline "release-train" with one workflow whose workflow_id is "build-and-test".
+      That workflow has one job "unit-tests" running on linux with 8 cores and the single
+      label "self-hosted"; timeout_minutes is 30.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        pipeline:
+          type: object
+          additionalProperties: false
+          properties:
+            name: {type: string, minLength: 3, maxLength: 60}
+            workflows:
+              type: array
+              minItems: 1
+              maxItems: 3
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  workflow_id: {type: string, pattern: "^[a-z][a-z0-9-]{2,20}$"}
+                  jobs:
+                    type: array
+                    minItems: 1
+                    maxItems: 5
+                    items:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        job_name: {type: string, minLength: 2, maxLength: 40}
+                        runner:
+                          type: object
+                          additionalProperties: false
+                          properties:
+                            os: {type: string, enum: [linux, windows, macos]}
+                            cores: {type: integer, minimum: 1, maximum: 32}
+                            labels:
+                              type: array
+                              minItems: 1
+                              maxItems: 4
+                              items: {type: string, minLength: 1, maxLength: 30}
+                          required: [os, cores, labels]
+                        timeout_minutes: {type: integer, exclusiveMinimum: 0, maximum: 360}
+                      required: [job_name, runner, timeout_minutes]
+                required: [workflow_id, jobs]
+          required: [name, workflows]
+      required: [pipeline]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.pipeline.name": "release-train"
+        "$.pipeline.workflows[0].workflow_id": "build-and-test"
+        "$.pipeline.workflows[0].jobs[0].job_name": "unit-tests"
+        "$.pipeline.workflows[0].jobs[0].runner.os": "linux"
+        "$.pipeline.workflows[0].jobs[0].runner.cores": 8
+        "$.pipeline.workflows[0].jobs[0].runner.labels": ["self-hosted"]
+        "$.pipeline.workflows[0].jobs[0].timeout_minutes": 30
+    max_rounds: 3
+    notes: |
+      中文说明：五层结构（pipeline → workflows[] → jobs[] → runner → labels[]），主要考"括号
+      闭合与层级错位"：模型很爱把 runner 的字段直接拍平到 job 上，或把 timeout_minutes 写进
+      runner。cores 是整数（写成 "8" 失败），labels 是数组（写成字符串 "self-hosted" 失败），
+      workflow_id 的 pattern 还会拒绝下划线写法的 "build_and_test"。
+
+  # ------------------------------------------------------------------ dn_011 --
+  - id: dn_011
+    title: ML config with union optimizer
+    tags: [union, oneOf, ml]
+    difficulty: 5
+    prompt: |
+      Produce the experiment config for the run as raw JSON only.
+
+      run_name "ablation_seed42", seed 1234.
+      Optimizer: kind "adamw", learning_rate 0.0003, weight_decay 0.01.
+      Scheduler: kind "cosine" with warmup_steps 2000.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        experiment:
+          type: object
+          additionalProperties: false
+          properties:
+            run_name: {type: string, pattern: "^[a-z][a-z0-9_]{2,30}$"}
+            seed: {type: integer, minimum: 0, maximum: 4294967295}
+            optimizer:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: adamw}
+                    learning_rate: {type: number, exclusiveMinimum: 0, maximum: 1}
+                    weight_decay: {type: number, minimum: 0, maximum: 1}
+                  required: [kind, learning_rate, weight_decay]
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: sgd}
+                    learning_rate: {type: number, exclusiveMinimum: 0, maximum: 1}
+                    momentum: {type: number, exclusiveMinimum: 0, exclusiveMaximum: 1}
+                    nesterov: {type: boolean}
+                  required: [kind, learning_rate, momentum, nesterov]
+            scheduler:
+              anyOf:
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: cosine}
+                    warmup_steps: {type: integer, minimum: 0}
+                  required: [kind, warmup_steps]
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: constant}
+                    factor: {type: number, exclusiveMinimum: 0, maximum: 1}
+                  required: [kind, factor]
+          required: [run_name, seed, optimizer, scheduler]
+      required: [experiment]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.experiment.run_name": "ablation_seed42"
+        "$.experiment.seed": 1234
+        "$.experiment.optimizer.kind": "adamw"
+        "$.experiment.optimizer.learning_rate": 0.0003
+        "$.experiment.optimizer.weight_decay": 0.01
+        "$.experiment.scheduler.kind": "cosine"
+        "$.experiment.scheduler.warmup_steps": 2000
+    max_rounds: 3
+    notes: |
+      中文说明：oneOf 的两个优化器分支字段不同，模型最容易"混合分支"：写 kind="adamw" 却带上
+      momentum / nesterov，或者给 cosine 调度器补上 factor。分支内 additionalProperties:false
+      让混合体必然失败。learning_rate 0.0003 还会暴露"科学计数法写成 3e-4 字符串"的问题，
+      seed 是整数上限 4294967295，写成字符串同样失败。
+
+  # ------------------------------------------------------------------ dn_012 --
+  - id: dn_012
+    title: Medical vitals record nesting
+    tags: [nesting, enum, nullable]
+    difficulty: 4
+    prompt: |
+      Structure this triage note as raw JSON only.
+
+      Encounter id 3f2504e0-4f89-11d3-9a0c-0305e82c3301, acuity 2, complaint
+      "shortness of breath".
+      Vitals: systolic 128, diastolic 82, temperature 37.1, spo2 96.
+      The patient could not report a pain score, so pain_score must be null.
+      Disposition: observe.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        encounter:
+          type: object
+          additionalProperties: false
+          properties:
+            encounter_id: {type: string, format: uuid}
+            triage:
+              type: object
+              additionalProperties: false
+              properties:
+                acuity: {type: integer, minimum: 1, maximum: 5}
+                complaint: {type: string, minLength: 3, maxLength: 200}
+                vitals:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    systolic: {type: integer, minimum: 40, maximum: 300}
+                    diastolic: {type: integer, minimum: 20, maximum: 200}
+                    temperature_c: {type: number, minimum: 25, maximum: 45}
+                    spo2_percent: {type: integer, minimum: 50, maximum: 100}
+                    pain_score: {type: ["integer", "null"], minimum: 0, maximum: 10}
+                  required: [systolic, diastolic, temperature_c, spo2_percent, pain_score]
+              required: [acuity, complaint, vitals]
+            disposition: {type: string, enum: [admit, discharge, observe, transfer]}
+          required: [encounter_id, triage, disposition]
+      required: [encounter]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.encounter.encounter_id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+        "$.encounter.triage.acuity": 2
+        "$.encounter.triage.vitals.systolic": 128
+        "$.encounter.triage.vitals.temperature_c": 37.1
+        "$.encounter.disposition": "observe"
+      must_be_null:
+        - "$.encounter.triage.vitals.pain_score"
+    max_rounds: 2
+    notes: |
+      中文说明：临床数据里"没测"和"测出 0"语义完全不同。pain_score 是
+      ["integer","null"] 且 must_be_null，模型却经常写 0（"无痛"的误解）或省略字段。
+      另外 temperature_c 是浮点、spo2_percent 是整数，两者互换或写成字符串是高频错误；
+      blood pressure 的 systolic/diastolic 也有上下限，编造 320/210 会被拒。
+
+  # ------------------------------------------------------------------ dn_013 --
+  - id: dn_013
+    title: Route geometry bounds typing
+    tags: [geo, bounds, arrays]
+    difficulty: 3
+    prompt: |
+      Encode the cycling route as raw JSON.
+
+      Route id BK-4471, one-way false, distance 18.4 km.
+      Two checkpoints on the way. The first is at lat 37.7749, lon -122.4194 and its
+      barometric elevation was never recorded, so that waypoint's elevation_m must be null.
+      The second checkpoint is further north at lat 47.6062, lon -122.3321 with elevation 12.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        route:
+          type: object
+          additionalProperties: false
+          properties:
+            route_id: {type: string, pattern: "^[A-Z]{2}-[0-9]{4}$"}
+            distance_km: {type: number, exclusiveMinimum: 0, maximum: 20000}
+            one_way: {type: boolean}
+            waypoints:
+              type: array
+              minItems: 2
+              maxItems: 50
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  lat: {type: number, minimum: -90, maximum: 90}
+                  lon: {type: number, minimum: -180, maximum: 180}
+                  elevation_m: {type: ["number", "null"]}
+                required: [lat, lon, elevation_m]
+          required: [route_id, distance_km, one_way, waypoints]
+      required: [route]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.route.route_id": "BK-4471"
+        "$.route.distance_km": 18.4
+        "$.route.one_way": false
+        "$.route.waypoints[0].lat": 37.7749
+        "$.route.waypoints[0].lon": -122.4194
+      must_be_null:
+        - "$.route.waypoints[0].elevation_m"
+    max_rounds: 2
+    notes: |
+      中文说明：纬度/经度是浮点且带 -90/90、-180/180 边界，模型把经度写成 "122.4194W"
+      字符串或把海拔写成 0 都很常见。第一个点的海拔必须显式 null（"未知"不等于 0），
+      数组 minItems=2 则保证不能只给一个点——少给一个点会让 waypoints[0] 之类的取值校验
+      直接报"字段缺失"。
+
+  # ------------------------------------------------------------------ dn_014 --
+  - id: dn_014
+    title: i18n bundle length constraints
+    tags: [i18n, strings, length]
+    difficulty: 2
+    prompt: |
+      Return the fr-FR i18n bundle as raw JSON, version 3.
+
+      The greeting text is "Bonjour tout le monde"; the plural form is not translated yet,
+      so the plural field must be explicit null.
+      Error messages: not_found "Page introuvable", timeout "Delai depasse".
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        bundle:
+          type: object
+          additionalProperties: false
+          properties:
+            locale: {type: string, enum: [en-US, fr-FR, ja-JP]}
+            version: {type: integer, minimum: 1, multipleOf: 1}
+            messages:
+              type: object
+              additionalProperties: false
+              properties:
+                greeting:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    text: {type: string, minLength: 2, maxLength: 80}
+                    plural: {type: ["string", "null"], maxLength: 80}
+                  required: [text, plural]
+                errors:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    not_found: {type: string, minLength: 2, maxLength: 120}
+                    timeout: {type: string, minLength: 2, maxLength: 120}
+                  required: [not_found, timeout]
+              required: [greeting, errors]
+          required: [locale, version, messages]
+      required: [bundle]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.bundle.locale": "fr-FR"
+        "$.bundle.version": 3
+      must_be_null:
+        - "$.bundle.messages.greeting.plural"
+      must_contain:
+        "$.bundle.messages.greeting.text": "Bonjour"
+    max_rounds: 2
+    notes: |
+      中文说明：这道题难度不高，专门验证"基础功"：locale 枚举必须严格匹配 "fr-FR"（写成
+      "fr_FR" 或 "fr" 都失败）、version 是整数且必须 ≥1、greeting.text 必须真的包含
+      "Bonjour"（必须包含类校验抓"模型自己重写文案"），plural 未知时必须显式 null 而不是
+      省略。四个小坑叠在一起，几乎没有模型能 100% 一次过。
+
+  # ------------------------------------------------------------------ dn_015 --
+  - id: dn_015
+    title: IoT telemetry batch envelope
+    tags: [iot, format, type-array]
+    difficulty: 5
+    prompt: |
+      Ingest this telemetry batch as raw JSON only.
+
+      Device 3f2504e0-4f89-11d3-9a0c-0305e82c3301, firmware 1234, ip 10.20.30.40.
+      The device has never reported in, so last_seen must be null.
+      One sample: seq 1, metric temperature, value 21.5, quality good; the raw register
+      reading was unavailable, so raw_reading must be null.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        batch:
+          type: object
+          additionalProperties: false
+          properties:
+            device:
+              type: object
+              additionalProperties: false
+              properties:
+                device_id: {type: string, format: uuid}
+                firmware: {type: string, pattern: "^[0-9]{4}$"}
+                ip_address: {type: string, format: ipv4}
+                last_seen: {type: ["string", "null"], format: date-time}
+              required: [device_id, firmware, ip_address, last_seen]
+            samples:
+              type: array
+              minItems: 1
+              maxItems: 100
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  seq: {type: integer, minimum: 1}
+                  metric: {type: string, enum: [temperature, humidity, pressure, voltage]}
+                  value: {type: number, minimum: -100, maximum: 1000}
+                  quality: {type: string, enum: [good, degraded, bad]}
+                  raw_reading: {type: ["number", "null"]}
+                required: [seq, metric, value, quality, raw_reading]
+          required: [device, samples]
+      required: [batch]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.batch.device.ip_address": "10.20.30.40"
+        "$.batch.device.firmware": "1234"
+        "$.batch.samples[0].seq": 1
+        "$.batch.samples[0].metric": "temperature"
+        "$.batch.samples[0].value": 21.5
+        "$.batch.samples[0].quality": "good"
+      must_be_null:
+        - "$.batch.device.last_seen"
+        - "$.batch.samples[0].raw_reading"
+    max_rounds: 3
+    notes: |
+      中文说明：format 家族大集合（uuid / ipv4 / date-time）+ 两个必须为 null 的字段。
+      模型会把 ip 写成 "10.20.30.40:1883"（带端口，ipv4 失败）、把 firmware 写成整数
+      1234（pattern 要求字符串）、把 last_seen 省略或写 "never"。raw_reading 是
+      ["number","null"]，写成 0 会被 must_be_null 抓住——这是"零值 vs 缺失值"的经典混淆。
+
+  # ------------------------------------------------------------------ dn_016 --
+  - id: dn_016
+    title: SEPA transfer money constraints
+    tags: [money, multipleOf, enum]
+    difficulty: 4
+    prompt: |
+      Create the SEPA transfer instruction as raw JSON only.
+
+      amount 249.99 EUR, fee 2.5, rail sepa, and the settlement must complete within 12.5
+      hours (half-hour granularity). The idempotency key is
+      3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+      No payment reference was supplied, so reference must be null.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        transfer:
+          type: object
+          additionalProperties: false
+          properties:
+            amount: {type: number, exclusiveMinimum: 0, maximum: 1000000}
+            fee: {type: number, minimum: 0, maximum: 100}
+            settlement_hours: {type: number, exclusiveMinimum: 0, maximum: 72, multipleOf: 0.5}
+            currency: {type: string, enum: [USD, EUR, JPY, GBP]}
+            rail: {type: string, enum: [ach, wire, sepa, swift]}
+            idempotency_key: {type: string, format: uuid}
+            reference: {type: ["string", "null"], maxLength: 140}
+          required: [amount, fee, settlement_hours, currency, rail, idempotency_key, reference]
+      required: [transfer]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.transfer.amount": 249.99
+        "$.transfer.fee": 2.5
+        "$.transfer.settlement_hours": 12.5
+        "$.transfer.currency": "EUR"
+        "$.transfer.rail": "sepa"
+        "$.transfer.idempotency_key": "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+      must_be_null:
+        - "$.transfer.reference"
+    max_rounds: 2
+    notes: |
+      中文说明：金额场景的三个经典崩法——把 249.99 引号化成字符串、把金额写成分单位的整数
+      24999、以及把 settlement_hours 写成 "12.5" 字符串（multipleOf 0.5 要求它是数字且为
+      半小时的整数倍，写 12.4 会失败）。rail 是枚举，模型爱写 "SEPA" 大写或
+      "sepa-transfer"；reference 未知时必须显式 null，而不是编一个 "N/A" 或空串。
+
+  # ------------------------------------------------------------------ dn_017 --
+  - id: dn_017
+    title: Ticket labels and comment array
+    tags: [array, enum, nesting]
+    difficulty: 3
+    prompt: |
+      File the ticket as raw JSON only.
+
+      Ticket 4102331, priority P1, sla 8 hours (a whole number greater than zero).
+      Labels: "regression" and "api".
+      One comment from author 9001, marked internal (true), and its body must mention
+      "reproduce" because QA needs the steps.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        ticket:
+          type: object
+          additionalProperties: false
+          properties:
+            ticket_id: {type: string, pattern: "^[0-9]{7}$"}
+            priority: {type: string, enum: [P0, P1, P2, P3]}
+            sla_hours: {type: integer, exclusiveMinimum: 0, maximum: 72}
+            labels:
+              type: array
+              minItems: 1
+              maxItems: 5
+              items: {type: string, minLength: 2, maxLength: 30}
+            comments:
+              type: array
+              minItems: 1
+              maxItems: 20
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  author_id: {type: integer, minimum: 1}
+                  body: {type: string, minLength: 1, maxLength: 5000}
+                  internal: {type: boolean}
+                required: [author_id, body, internal]
+          required: [ticket_id, priority, sla_hours, labels, comments]
+      required: [ticket]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.ticket.ticket_id": "4102331"
+        "$.ticket.priority": "P1"
+        "$.ticket.sla_hours": 8
+        "$.ticket.labels": ["regression", "api"]
+        "$.ticket.comments[0].author_id": 9001
+        "$.ticket.comments[0].internal": true
+      must_contain:
+        "$.ticket.comments[0].body": "reproduce"
+    max_rounds: 2
+    notes: |
+      中文说明：ticket_id 是 7 位数字字符串（写成整数 4102331 会被 pattern 类型拒收），
+      priority 是枚举 "P1"（写 "p1" 或 "high" 失败），labels 必须是长度为 2 的字符串数组
+      （写成一个 "regression,api" 字符串失败）。comments 是对象数组，author_id 必须是整数，
+      body 还必须包含 "reproduce"——考"必须包含内容"这类规则。
+
+  # ------------------------------------------------------------------ dn_018 --
+  - id: dn_018
+    title: Product variant physical or digital
+    tags: [union, oneOf, ecommerce]
+    difficulty: 5
+    prompt: |
+      Emit the product variant payload as raw JSON only.
+
+      sku "TSHIRT1", price 1999 cents, taxable true.
+      This is the physical variant: weight 250 grams, dimensions 30 x 20 x 2 cm
+      (length, width, height).
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        product:
+          type: object
+          additionalProperties: false
+          properties:
+            sku: {type: string, pattern: "^[A-Z0-9]{6,10}$"}
+            price_cents: {type: integer, minimum: 1}
+            taxable: {type: boolean}
+            variant:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: physical}
+                    weight_grams: {type: integer, minimum: 1, maximum: 70000}
+                    dimensions:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        length_cm: {type: number, exclusiveMinimum: 0, maximum: 300}
+                        width_cm: {type: number, exclusiveMinimum: 0, maximum: 300}
+                        height_cm: {type: number, exclusiveMinimum: 0, maximum: 300}
+                      required: [length_cm, width_cm, height_cm]
+                  required: [kind, weight_grams, dimensions]
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: digital}
+                    download_url: {type: string, format: uri}
+                    license_key_required: {type: boolean}
+                  required: [kind, download_url, license_key_required]
+          required: [sku, price_cents, taxable, variant]
+      required: [product]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.product.sku": "TSHIRT1"
+        "$.product.price_cents": 1999
+        "$.product.taxable": true
+        "$.product.variant.kind": "physical"
+        "$.product.variant.weight_grams": 250
+        "$.product.variant.dimensions.length_cm": 30
+        "$.product.variant.dimensions.width_cm": 20
+        "$.product.variant.dimensions.height_cm": 2
+    max_rounds: 3
+    notes: |
+      中文说明：变体是 oneOf，两个分支共享 kind 字段但其余字段完全不同。模型最典型的失败是
+      "两个分支的字段都输出"：physical 分支里塞进 download_url，或给 digital 分支加 weight。
+      分支内部 additionalProperties:false 必然抓住。dimensions 又是第三层对象，漏写
+      height_cm 或写成 "2cm" 都会失败。
+
+  # ------------------------------------------------------------------ dn_019 --
+  - id: dn_019
+    title: Catalog entry string lengths
+    tags: [strings, length, forbidden]
+    difficulty: 2
+    prompt: |
+      Add this catalog entry as raw JSON only.
+
+      sku "TSHIRT1", display name "Classic Tee", revision 4, updated at 2024-05-06T07:08:09Z.
+      legacy_code was retired and is unknown, so it must be explicit null.
+      internal_notes is "imported from the legacy catalog".
+      Do not add extra keys such as api_key or debug_trace.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        catalog_entry:
+          type: object
+          additionalProperties: false
+          properties:
+            sku: {type: string, minLength: 6, maxLength: 12}
+            display_name: {type: string, minLength: 3, maxLength: 60}
+            revision: {type: integer, minimum: 1}
+            updated_at: {type: string, format: date-time}
+            legacy_code: {type: ["string", "null"], maxLength: 12}
+            internal_notes: {type: string, maxLength: 200}
+          required: [sku, display_name, revision, updated_at, legacy_code, internal_notes]
+      required: [catalog_entry]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.catalog_entry.sku": "TSHIRT1"
+        "$.catalog_entry.display_name": "Classic Tee"
+        "$.catalog_entry.revision": 4
+        "$.catalog_entry.updated_at": "2024-05-06T07:08:09Z"
+      must_be_null:
+        - "$.catalog_entry.legacy_code"
+      must_contain:
+        "$.catalog_entry.internal_notes": "legacy"
+      forbidden_paths:
+        - "$.catalog_entry.api_key"
+        - "$.debug_trace"
+    max_rounds: 2
+    notes: |
+      中文说明：基础但致命的一组约束——minLength/maxLength、format: date-time、必填、显式
+      null、禁止多余字段。模型的"好心"在这里是灾难：它会自动补 `"api_key": null`、
+      `"debug_trace": {...}`，或者把 revision 写成 `"4"`。日期格式也是重灾区，
+      "2024-05-06 07:08:09" 不带 T 会直接失败。
+
+  # ------------------------------------------------------------------ dn_020 --
+  - id: dn_020
+    title: Incident triage explicit nulls
+    tags: [null-value, forbidden, nested]
+    difficulty: 4
+    prompt: |
+      Close out incident INC-2049 in the triage log. Raw JSON only; every field the schema
+      lists is required.
+
+      Severity sev2, reporter 88421.
+      Nobody has claimed this yet, so assigned_team must be null; the root cause is still
+      unknown (root_cause null) and it is not resolved yet (resolved_at null).
+      Never include an api_key or internal_notes field.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        triage:
+          type: object
+          additionalProperties: false
+          properties:
+            ticket_ref: {type: string, pattern: "^[A-Z]{2,4}-[0-9]{4}$"}
+            severity: {type: string, enum: [sev1, sev2, sev3, sev4]}
+            reporter_id: {type: integer, minimum: 1}
+            assigned_team:
+              type: ["string", "null"]
+              enum: [payments, identity, platform, null]
+            root_cause: {type: ["string", "null"], maxLength: 200}
+            resolved_at: {type: ["string", "null"], format: date-time}
+          required: [ticket_ref, severity, reporter_id, assigned_team, root_cause, resolved_at]
+      required: [triage]
+    expect:
+      behaviour: null_value
+    ground_truth:
+      must_equal:
+        "$.triage.ticket_ref": "INC-2049"
+        "$.triage.severity": "sev2"
+        "$.triage.reporter_id": 88421
+      must_be_null:
+        - "$.triage.assigned_team"
+        - "$.triage.root_cause"
+        - "$.triage.resolved_at"
+      forbidden_paths:
+        - "$.triage.api_key"
+        - "$.internal_notes"
+    max_rounds: 3
+    notes: |
+      中文说明：三个字段必须显式 null，且 schema 里全部声明为 ["...","null"]——省略字段会
+      被 required 抓住，编造内容会被 must_be_null 抓住。assigned_team 还是"枚举里含 null"
+      的特例，模型有时会输出 "unassigned"、"none" 这类枚举外取值。ticket_ref 的 pattern
+      `^[A-Z]{2,4}-[0-9]{4}$` 恰好容纳 "INC-2049"，写 "inc-2049" 小写即失败。
+
+  # ------------------------------------------------------------------ dn_021 --
+  - id: dn_021
+    title: Six-level grid device hierarchy
+    tags: [nesting, depth, refs]
+    difficulty: 5
+    prompt: |
+      Serialise the grid hierarchy as raw JSON only.
+
+      org_id 4412, division code NW, site "Harbor Substation", zone index 3.
+      Device serial 3f2504e0-4f89-11d3-9a0c-0305e82c3301.
+      Measurement: unit kwh with a resolution of 0.5 minutes; the device is online (true).
+    target_schema:
+      $defs:
+        measurement:
+          type: object
+          additionalProperties: false
+          properties:
+            unit: {type: string, enum: [kwh, celsius, kpa, percent]}
+            resolution: {type: number, exclusiveMinimum: 0, maximum: 60}
+          required: [unit, resolution]
+      type: object
+      additionalProperties: false
+      properties:
+        org:
+          type: object
+          additionalProperties: false
+          properties:
+            org_id: {type: integer, minimum: 1}
+            division:
+              type: object
+              additionalProperties: false
+              properties:
+                division_code: {type: string, pattern: "^[A-Z]{2}$"}
+                site:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    site_name: {type: string, minLength: 2, maxLength: 80}
+                    zone:
+                      type: object
+                      additionalProperties: false
+                      properties:
+                        zone_index: {type: integer, minimum: 0, maximum: 99}
+                        device:
+                          type: object
+                          additionalProperties: false
+                          properties:
+                            device_serial: {type: string, format: uuid}
+                            online: {type: boolean}
+                            measurement: {$ref: "#/$defs/measurement"}
+                          required: [device_serial, online, measurement]
+                      required: [zone_index, device]
+                  required: [site_name, zone]
+              required: [division_code, site]
+          required: [org_id, division]
+      required: [org]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.org.org_id": 4412
+        "$.org.division.division_code": "NW"
+        "$.org.division.site.site_name": "Harbor Substation"
+        "$.org.division.site.zone.zone_index": 3
+        "$.org.division.site.zone.device.device_serial": "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+        "$.org.division.site.zone.device.online": true
+        "$.org.division.site.zone.device.measurement.unit": "kwh"
+        "$.org.division.site.zone.device.measurement.resolution": 0.5
+    max_rounds: 3
+    notes: |
+      中文说明：六层嵌套 + $ref。深度本身就是杀手：模型经常把 zone 的字段提到 site 层、
+      少一层花括号、或者把 measurement 内联展开成 device 的属性。resolution 是
+      exclusiveMinimum 0 的浮点（写 0 失败），division_code 是两位大写字母（写 "NW1" 失败），
+      device_serial 必须是合法 uuid 字符串。
+
+  # ------------------------------------------------------------------ dn_022 --
+  - id: dn_022
+    title: Deploy target kubernetes union
+    tags: [union, oneOf, ci]
+    difficulty: 4
+    prompt: |
+      Write the deployment plan as raw JSON only.
+
+      service "checkout-api", replicas 3, rollout canary.
+      The target is a kubernetes cluster named "prod-us-east" with one container using image
+      "ghcr.io/acme/api", port 8080 and env prod.
+    target_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        deployment:
+          type: object
+          additionalProperties: false
+          properties:
+            service: {type: string, minLength: 2, maxLength: 40}
+            replicas: {type: integer, minimum: 1, maximum: 50}
+            rollout: {type: string, enum: [rolling, blue_green, canary]}
+            target:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: kubernetes}
+                    cluster: {type: string, minLength: 3, maxLength: 60}
+                    containers:
+                      type: array
+                      minItems: 1
+                      maxItems: 10
+                      items:
+                        type: object
+                        additionalProperties: false
+                        properties:
+                          image: {type: string, pattern: "^[a-z][a-z0-9./-]{4,80}$"}
+                          port: {type: integer, minimum: 1, maximum: 65535}
+                          env: {type: string, enum: [prod, staging, dev]}
+                        required: [image, port, env]
+                  required: [kind, cluster, containers]
+                - type: object
+                  additionalProperties: false
+                  properties:
+                    kind: {const: serverless}
+                    region: {type: string, pattern: "^[a-z]{2}-[a-z]+-[0-9]$"}
+                    memory_mb: {type: integer, multipleOf: 64, minimum: 128, maximum: 10240}
+                  required: [kind, region, memory_mb]
+          required: [service, replicas, rollout, target]
+      required: [deployment]
+    expect:
+      behaviour: json
+    ground_truth:
+      must_equal:
+        "$.deployment.service": "checkout-api"
+        "$.deployment.replicas": 3
+        "$.deployment.rollout": "canary"
+        "$.deployment.target.kind": "kubernetes"
+        "$.deployment.target.cluster": "prod-us-east"
+        "$.deployment.target.containers[0].image": "ghcr.io/acme/api"
+        "$.deployment.target.containers[0].port": 8080
+        "$.deployment.target.containers[0].env": "prod"
+    max_rounds: 3
+    notes: |
+      中文说明：部署目标是一对一的 oneOf 分支。模型会把 serverless 的 memory_mb 顺手加进
+      kubernetes 分支（additionalProperties:false 抓住），或者把 containers 写成单个对象
+      而不是数组。image 的 pattern 强制全小写（"ghcr.io/Acme/api" 会失败），port 是整数，
+      rollout 枚举只允许 canary / rolling / blue_green（写 "blue-green" 失败）。
