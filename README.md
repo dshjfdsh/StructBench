@@ -6,10 +6,12 @@
 
 专治大模型「格式崩坏」与「参数幻觉」：面向 Agent 工具调用与极端 Schema 的轻量级评测基准。
 
+**English** | [简体中文](README.zh-CN.md)
+
 [![CI](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml/badge.svg)](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-279%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-300%20passing-brightgreen.svg)](tests/)
 [![Cases](https://img.shields.io/badge/cases-86%20adversarial-orange.svg)](datasets/)
 [![Judge model](https://img.shields.io/badge/judge%20model-not%20required-success.svg)](#why-no-llm-as-a-judge)
 
@@ -75,7 +77,7 @@ No API key needed — the offline simulator exercises the real evaluation path:
 
 ```bash
 git clone https://github.com/dshjfdsh/StructBench
-cd structbench
+cd StructBench
 pip install -e ".[dev]"
 
 # Validate the dataset integrity (every case solvable + discriminating)
@@ -362,7 +364,7 @@ structbench/
 │   ├── jsonpath.py             # the JSONPath-lite subset used by ground truth
 │   ├── providers/              # OpenAI-compatible client + offline simulator
 │   └── reporter/               # Rich console, Markdown, ECharts HTML template
-└── tests/                      # 279 tests
+└── tests/                      # 300 tests
 ```
 
 ---
@@ -371,10 +373,13 @@ structbench/
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 279 tests
+pytest -q                       # 300 tests
 ruff check . && ruff format --check .
 structbench validate            # dataset integrity
 ```
+
+> `ruff` is pinned to an exact version in `pyproject.toml`, and CI reads that same
+> pin, so your local linter and CI always agree.
 
 ## Roadmap
 

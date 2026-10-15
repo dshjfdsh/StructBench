@@ -60,6 +60,10 @@ jobs:
         run: uv run pytest -q
       - name: Dataset self-check
         run: uv run structbench validate --quiet
+      - name: READMEs stay in sync
+        run: uv run python scripts/check_readmes.py
+      - name: Dependencies still resolve
+        run: uv run python scripts/check_deps.py
 
   demo-run:
     name: offline demo run
