@@ -60,6 +60,10 @@ dev = [
     # An unpinned linter means CI can start failing on rules that did not exist
     # when the code was written, which is confusing and wastes a CI cycle.
     "ruff==0.14.14",
+    # `tomllib` only entered the standard library in 3.11, and this project still
+    # supports 3.10. `scripts/check_deps.py` reads pyproject.toml with it, so the
+    # backport is needed there -- and only there.
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.scripts]

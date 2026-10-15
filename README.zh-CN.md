@@ -11,7 +11,7 @@
 [![CI](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml/badge.svg)](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-300%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-315%20passing-brightgreen.svg)](tests/)
 [![Cases](https://img.shields.io/badge/cases-86%20adversarial-orange.svg)](datasets/)
 [![Judge model](https://img.shields.io/badge/judge%20model-not%20required-success.svg)](#为什么不用-llm-当裁判)
 
@@ -320,7 +320,7 @@ structbench/
 │   ├── jsonpath.py             # ground truth 使用的 JSONPath 子集
 │   ├── providers/              # OpenAI 兼容客户端 + 离线模拟器
 │   └── reporter/               # Rich 终端、Markdown、ECharts HTML 模板
-└── tests/                      # 300 项测试
+└── tests/                      # 315 项测试
 ```
 
 ---
@@ -329,7 +329,7 @@ structbench/
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 300 项测试
+pytest -q                       # 315 项测试
 ruff check . && ruff format --check .
 structbench validate            # 题库完整性
 ```

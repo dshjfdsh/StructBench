@@ -23,20 +23,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      # `ruff-action` reads the pinned version straight out of pyproject.toml, so
-      # `pip install -e ".[dev]"` locally and CI run the identical linter. An
-      # unpinned linter silently upgrades and fails the build on rules that did
-      # not exist when the change was written -- RUF043 is how that bit us once.
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      # Ruff is installed from the pinned `dev` extra rather than via a
+      # dedicated action, for two reasons: the version then comes from exactly one
+      # place (so `pip install -e ".[dev]"` locally and CI run the identical
+      # linter), and `astral-sh/ruff-action` still ships on node20, which GitHub
+      # force-migrates to node24 and reports as deprecated on every single job.
+      - name: Install the pinned dev toolchain
+        run: uv sync --extra dev
       - name: Ruff lint
-        uses: astral-sh/ruff-action@v3
-        with:
-          version-file: pyproject.toml
-          args: check --output-format=github
+        run: uv run ruff check --output-format=github .
       - name: Ruff format check
-        uses: astral-sh/ruff-action@v3
-        with:
-          version-file: pyproject.toml
-          args: format --check
+        run: uv run ruff format --check .
 
   test:
     name: test (python ${{ matrix.python-version }})

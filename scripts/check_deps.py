@@ -19,7 +19,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import tomllib
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 -- see the `tomli` extra in pyproject.toml
+    import tomli as tomllib  # type: ignore[no-redef]
 
 ROOT = Path(__file__).resolve().parents[1]
 

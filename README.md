@@ -11,7 +11,7 @@
 [![CI](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml/badge.svg)](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-300%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-315%20passing-brightgreen.svg)](tests/)
 [![Cases](https://img.shields.io/badge/cases-86%20adversarial-orange.svg)](datasets/)
 [![Judge model](https://img.shields.io/badge/judge%20model-not%20required-success.svg)](#why-no-llm-as-a-judge)
 
@@ -364,7 +364,7 @@ structbench/
 │   ├── jsonpath.py             # the JSONPath-lite subset used by ground truth
 │   ├── providers/              # OpenAI-compatible client + offline simulator
 │   └── reporter/               # Rich console, Markdown, ECharts HTML template
-└── tests/                      # 300 tests
+└── tests/                      # 315 tests
 ```
 
 ---
@@ -373,7 +373,7 @@ structbench/
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 300 tests
+pytest -q                       # 315 tests
 ruff check . && ruff format --check .
 structbench validate            # dataset integrity
 ```
