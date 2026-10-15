@@ -1,0 +1,18 @@
+# Normalise line endings so that a Windows contributor and a Linux CI runner
+# produce identical bytes, and so the YAML fixtures keep working everywhere.
+* text=auto eol=lf
+
+# Binary-ish assets that must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.ico binary
+*.whl binary
+
+# Keep the ECharts template and datasets byte-stable: escaping and trailing
+# whitespace inside the .yaml fixtures are semantically meaningful.
+*.html text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# GitHub renders these from the working tree.
+.github/workflows/*.yml text eol=lf
