@@ -6,7 +6,7 @@
 
 专治大模型「格式崩坏」与「参数幻觉」：面向 Agent 工具调用与极端 Schema 的轻量级评测基准。
 
-[![CI](https://github.com/structbench/structbench/actions/workflows/ci.yml/badge.svg)](https://github.com/structbench/structbench/actions/workflows/ci.yml)
+[![CI](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml/badge.svg)](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-279%20passing-brightgreen.svg)](tests/)
@@ -74,7 +74,7 @@ Composition: 62 JSON-mode · 13 tool-call · 9 clarify (anti-hallucination) ·
 No API key needed — the offline simulator exercises the real evaluation path:
 
 ```bash
-git clone https://github.com/structbench/structbench
+git clone https://github.com/dshjfdsh/StructBench
 cd structbench
 pip install -e ".[dev]"
 
@@ -86,9 +86,11 @@ structbench run -m mock:good,mock:flaky,mock:escape_phobic,mock:typing_weak \
                 --concurrency 8 --markdown -
 ```
 
-`results/report.html` opens as a single self-contained file with a radar chart, a
-stacked error-taxonomy chart, latency comparison, and a filterable explorer
-showing each model's actual output next to the expected schema.
+`results/report.html` opens as one file with the whole run embedded as JSON — a
+radar chart, a stacked error-taxonomy chart, latency comparison, and a filterable
+explorer showing each model's actual output next to the expected schema. The chart
+*library* loads from a CDN by default; add `--inline-echarts path/to/echarts.min.js`
+for an artifact that renders with no network at all.
 
 ### Against real models
 

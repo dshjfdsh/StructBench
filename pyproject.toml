@@ -56,10 +56,10 @@ dev = [
 structbench = "structbench.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/structbench/structbench"
-Repository = "https://github.com/structbench/structbench"
-Issues = "https://github.com/structbench/structbench/issues"
-Changelog = "https://github.com/structbench/structbench/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/dshjfdsh/StructBench"
+Repository = "https://github.com/dshjfdsh/StructBench"
+Issues = "https://github.com/dshjfdsh/StructBench/issues"
+Changelog = "https://github.com/dshjfdsh/StructBench/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/structbench"]

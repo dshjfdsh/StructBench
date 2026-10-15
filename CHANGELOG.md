@@ -87,5 +87,5 @@ and tool calling, usable with **zero API keys**.
 - 279 unit tests, `scripts/selfcheck.py`, GitHub Actions CI across Python
   3.10–3.13, ruff lint and format enforcement, MIT licence.
 
-[Unreleased]: https://github.com/structbench/structbench/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/structbench/structbench/releases/tag/v0.1.0
+[Unreleased]: https://github.com/dshjfdsh/StructBench/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/dshjfdsh/StructBench/releases/tag/v0.1.0
