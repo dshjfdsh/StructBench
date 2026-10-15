@@ -47,9 +47,19 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23; python_version < '4'",
-    "ruff>=0.5",
+    # Capped at the major version this suite is actually verified against.
+    # `uv sync` resolves fresh on every CI run, so an unbounded pytest would
+    # eventually pull in a release with different collection semantics and break
+    # a build that has nothing to do with the change under review. Widen this
+    # only after running the suite on the newer major.
+    "pytest>=8.0,<9",
+    # Only needed if you add `async def` tests of your own: the shipped suite is
+    # deliberately plugin-free (it drives asyncio.run() from sync tests).
+    "pytest-asyncio>=0.23",
+    # Pinned exactly, and mirrored by the ruff pin in .github/workflows/ci.yml.
+    # An unpinned linter means CI can start failing on rules that did not exist
+    # when the code was written, which is confusing and wastes a CI cycle.
+    "ruff==0.14.14",
 ]
 
 [project.scripts]
@@ -84,7 +94,6 @@ ignore = [
     "E501",    # line length is handled by the formatter's judgement, not a hard rule
     "B008",    # Typer's API *requires* function calls in argument defaults
     "UP007",   # dynamic unions (Union[tuple(types)]) cannot use PEP 604 syntax
-    "UP038",   # isinstance(x, (int, float)) is measurably faster than int | float
     "RUF001",  # ambiguous unicode: the reports are intentionally bilingual
     "RUF002",
     "RUF003",
@@ -94,10 +103,11 @@ ignore = [
 "tests/*" = ["S101"]
 
 [tool.pytest.ini_options]
-# The suite itself uses plain sync tests that drive ``asyncio.run`` internally,
-# so it runs with *zero* plugins beyond pytest. pytest-asyncio is only needed if
-# you add `async def` tests of your own.
-asyncio_mode = "auto"
+# The suite is deliberately plugin-free: every test is a plain sync function that
+# drives `asyncio.run()` internally, so `pytest` alone runs it. That is also why
+# no `asyncio_mode` is set here -- pytest-asyncio is an optional extra, and
+# declaring the option without the plugin installed only produces a warning.
+# If you add `async def` tests, install the extra and set `asyncio_mode = "auto"`.
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --strict-markers"

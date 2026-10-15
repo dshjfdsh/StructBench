@@ -233,7 +233,9 @@ class TestStructure:
         assert compiled.adapter.validate_python({"next": {"next": {}}}) is not None
 
     def test_unsupported_constructs_raise_with_guidance(self) -> None:
-        with pytest.raises(SchemaCompileError, match="tuple-form|lookaround|unsupported"):
+        # Raw string: this is a regex alternation, and RUF043 wants that intent
+        # spelled out rather than left to the reader.
+        with pytest.raises(SchemaCompileError, match=r"tuple-form|lookaround|unsupported"):
             compile_schema({"type": "array", "items": [{"type": "string"}]}, "tuple")
         with pytest.raises(SchemaCompileError, match="accepts nothing"):
             compile_schema(False, "never")
