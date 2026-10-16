@@ -61,6 +61,13 @@ jobs:
         run: uv run pytest -q
       - name: Dataset self-check
         run: uv run structbench validate --quiet
+      - name: The report renders offline
+        # The downloaded-release artifact must not silently need a CDN. Generates a
+        # report and asserts on the output, so a regression in the template or the
+        # vendoring fails here rather than on a Release page.
+        run: |
+          uv run structbench run -m mock:good -n 5 --quiet -o ci-report
+          uv run python scripts/check_report_offline.py ci-report/report.html
       - name: READMEs stay in sync
         run: uv run python scripts/check_readmes.py
       - name: Dependencies still resolve

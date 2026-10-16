@@ -75,6 +75,14 @@ jobs:
             --charts release-results/charts
       - name: Verify the harness is self-consistent
         run: uv run python scripts/ci_gate.py release-results
+      - name: Verify the report needs no network
+        # The report is the artefact people download and double-click, so a CDN
+        # reference means a blank page offline. This is the exact bug that shipped
+        # in v0.1.0; assert it cannot regress into a release.
+        #
+        # A script rather than inline shell so it can be tested locally -- the
+        # inline-heredoc-in-YAML pattern is untestable and already cost us a cycle.
+        run: uv run python scripts/check_report_offline.py release-results/report.html
       - name: Stage release assets
         run: |
           mkdir -p release-assets

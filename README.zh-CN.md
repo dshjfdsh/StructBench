@@ -11,7 +11,7 @@
 [![CI](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml/badge.svg)](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-393%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-406%20passing-brightgreen.svg)](tests/)
 [![Cases](https://img.shields.io/badge/cases-86%20adversarial-orange.svg)](datasets/)
 [![Judge model](https://img.shields.io/badge/judge%20model-not%20required-success.svg)](#为什么不用-llm-当裁判)
 
@@ -80,7 +80,18 @@ structbench run -m mock:good,mock:flaky,mock:escape_phobic,mock:typing_weak \
 
 `results/report.html` 是一个把整轮结果内嵌为 JSON 的单文件报告：包含雷达图、错误类型堆叠图、延迟对比，以及一个可筛选的失败 Case 浏览器——左边是模型的真实输出，右边是 Schema 期望。
 
-> 图表**库**默认从 CDN 加载；加 `--inline-echarts path/to/echarts.min.js` 可得到完全离线的单文件产物。
+图表库已被**内联**，所以这份报告**断网也能正常显示**——直接双击打开，或者发给没有网络的人，图表照样绘制。这一点很关键，因为它正是人们从 Release 下载后要打开的那个文件。如果你更想要一个极小的文件，`--echarts-src URL` 会改为从 CDN 加载 ECharts（约 27 KB 而非 1.2 MB），代价是必须联网。
+
+### 下载已发布的版本
+
+每个 GitHub Release 都会附带 `report.html` 和 `structbench-0.1.0-py3-none-any.whl`。后者会把工具**连同题库一起装上**：
+
+```bash
+pip install https://github.com/dshjfdsh/StructBench/releases/download/v0.1.0/structbench-0.1.0-py3-none-any.whl
+structbench validate      # 安装后即可直接使用内置的 86 道题
+```
+
+`.tar.gz` 是同样内容的源码归档，`run-*.json` 是图表背后的原始跑分数据——它们用于 `structbench report`，不是用来安装的。
 
 ### 接真实模型
 
@@ -269,7 +280,8 @@ structbench providers  列出厂商预置与对应环境变量
 | `--markdown` | 将天梯榜输出为 Markdown（`-` 表示输出到标准输出）。 |
 | `--charts DIR` | 输出静态 SVG 图表——可直接提交并嵌入 README 的那种。 |
 | `--no-charts` | 跳过终端的条形图摘要，输出更紧凑的日志。 |
-| `--inline-echarts` | 内嵌本地 `echarts.min.js`，生成完全离线的报告。 |
+| `--inline-echarts` | 内嵌你指定的 `echarts.min.js`，替代内置副本。 |
+| `--echarts-src URL` | 从 URL 加载 ECharts（文件小得多，但需要联网）。 |
 
 ---
 
@@ -359,7 +371,7 @@ structbench/
 │       ├── charts.py           # RunResult → 提交进仓库的图表集
 │       ├── html.py             # 单文件交互式报告的数据组装
 │       └── template.html       # ECharts 雷达图/错误分布/失败浏览器模板
-└── tests/                      # 393 项测试
+└── tests/                      # 406 项测试
 ```
 
 ---
@@ -368,7 +380,7 @@ structbench/
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 393 项测试
+pytest -q                       # 406 项测试
 ruff check . && ruff format --check .
 structbench validate            # 题库完整性
 ```

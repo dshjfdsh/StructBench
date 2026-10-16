@@ -11,7 +11,7 @@
 [![CI](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml/badge.svg)](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-393%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-406%20passing-brightgreen.svg)](tests/)
 [![Cases](https://img.shields.io/badge/cases-86%20adversarial-orange.svg)](datasets/)
 [![Judge model](https://img.shields.io/badge/judge%20model-not%20required-success.svg)](#why-no-llm-as-a-judge)
 
@@ -90,9 +90,27 @@ structbench run -m mock:good,mock:flaky,mock:escape_phobic,mock:typing_weak \
 
 `results/report.html` opens as one file with the whole run embedded as JSON — a
 radar chart, a stacked error-taxonomy chart, latency comparison, and a filterable
-explorer showing each model's actual output next to the expected schema. The chart
-*library* loads from a CDN by default; add `--inline-echarts path/to/echarts.min.js`
-for an artifact that renders with no network at all.
+explorer showing each model's actual output next to the expected schema.
+
+The charting library is inlined, so **the report works with the network unplugged** —
+double-click it, or hand it to someone without internet, and the charts still draw.
+That matters because this is the file people download from a Release. If you want a
+much smaller file instead, `--echarts-src URL` loads ECharts from a CDN (about 27 KB
+instead of 1.2 MB) at the cost of needing a connection.
+
+### Downloading a prebuilt release
+
+Every GitHub Release ships `report.html` and `structbench-0.1.0-py3-none-any.whl`.
+The wheel installs the tool *and* the benchmark suite:
+
+```bash
+pip install https://github.com/dshjfdsh/StructBench/releases/download/v0.1.0/structbench-0.1.0-py3-none-any.whl
+structbench validate      # the bundled 86 cases are importable from the install
+```
+
+The `.tar.gz` is the same content as a source archive, and the `run-*.json` files
+are the raw archives behind the charts — useful for `structbench report`, not for
+installing.
 
 ### Against real models
 
@@ -314,7 +332,8 @@ Useful flags for `run`:
 | `--markdown` | Write the leaderboard as Markdown (`-` for stdout). |
 | `--charts DIR` | Write the static SVG charts — the ones you can commit and embed. |
 | `--no-charts` | Skip the terminal bar-chart summary for a compact log. |
-| `--inline-echarts` | Embed a local `echarts.min.js` for a fully offline report. |
+| `--inline-echarts` | Inline a specific `echarts.min.js` instead of the vendored copy. |
+| `--echarts-src URL` | Load ECharts from a URL (much smaller file, needs network). |
 
 ---
 
@@ -410,7 +429,7 @@ structbench/
 │       ├── charts.py           # RunResult → the committed chart set
 │       ├── html.py             # single-file interactive report payload
 │       └── template.html       # ECharts radar/taxonomy/failure-explorer template
-└── tests/                      # 393 tests
+└── tests/                      # 406 tests
 ```
 
 ---
@@ -419,7 +438,7 @@ structbench/
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 393 tests
+pytest -q                       # 406 tests
 ruff check . && ruff format --check .
 structbench validate            # dataset integrity
 ```

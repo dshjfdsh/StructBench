@@ -244,7 +244,17 @@ def run_command(
     ] = False,
     inline_echarts: Annotated[
         Path | None,
-        typer.Option("--inline-echarts", help="Path to echarts.min.js to embed (offline report)."),
+        typer.Option(
+            "--inline-echarts",
+            help="Inline this echarts.min.js instead of the vendored copy.",
+        ),
+    ] = None,
+    echarts_src: Annotated[
+        str | None,
+        typer.Option(
+            "--echarts-src",
+            help="Load echarts from this URL instead (smaller file, needs network).",
+        ),
     ] = None,
     title: Annotated[str | None, typer.Option("--title", help="Report title.")] = None,
     show_failures: Annotated[
@@ -385,6 +395,7 @@ def run_command(
                 cases=cases,
                 title=title,
                 inline_echarts=inline_echarts,
+                echarts_src=echarts_src,
             )
         except FileNotFoundError as exc:
             err_console.print(Text(str(exc), style="yellow"))
@@ -439,7 +450,14 @@ def report_command(
     ] = None,
     title: Annotated[str | None, typer.Option("--title", help="Report title.")] = None,
     inline_echarts: Annotated[
-        Path | None, typer.Option("--inline-echarts", help="Embed a local echarts.min.js.")
+        Path | None,
+        typer.Option(
+            "--inline-echarts", help="Inline this echarts.min.js instead of the vendored one."
+        ),
+    ] = None,
+    echarts_src: Annotated[
+        str | None,
+        typer.Option("--echarts-src", help="Load echarts from this URL (smaller, needs network)."),
     ] = None,
     markdown: Annotated[
         Path | None,
@@ -490,7 +508,14 @@ def report_command(
 
     target = output or archive.with_suffix(".html")
     try:
-        write_html_report(result, target, cases=cases, title=title, inline_echarts=inline_echarts)
+        write_html_report(
+            result,
+            target,
+            cases=cases,
+            title=title,
+            inline_echarts=inline_echarts,
+            echarts_src=echarts_src,
+        )
     except FileNotFoundError as exc:
         err_console.print(Text(str(exc), style="bold red"))
         raise typer.Exit(EXIT_CONFIG_ERROR) from None

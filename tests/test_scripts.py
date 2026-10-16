@@ -128,3 +128,92 @@ def test_every_script_has_a_docstring() -> None:
         docstring = ast.get_docstring(tree)
         assert docstring, f"{path.name} has no module docstring"
         assert "Usage::" in docstring, f"{path.name} does not document its usage"
+
+
+class TestReportOfflineCheck:
+    """The guard that stopped a blank-page report from being released again."""
+
+    checker = load_script(ROOT / "scripts" / "check_report_offline.py")
+
+    def offline_report(self, workdir: Path) -> Path:
+        """A report with the library inlined, produced by the real generator."""
+        sys.path.insert(0, str(ROOT / "src"))
+        try:
+            from structbench.metrics import compute_run_result
+            from structbench.models import Attempt, AttemptStatus, CaseResult
+            from structbench.reporter import render_html_report
+        finally:
+            sys.path.pop(0)
+
+        attempt = Attempt(
+            round=1,
+            passed=True,
+            raw_text='{"a": 1}',
+            status=AttemptStatus.OK,
+        )
+        record = CaseResult(
+            case_id="c1",
+            category="deep_nesting",
+            model="mock/x",
+            title="t",
+            attempts=[attempt],
+            passed_at_1=True,
+            passed_after_heal=True,
+        )
+        result = compute_run_result(
+            version="0.0-test",
+            records=[record],
+            models=[("mock/x", "mock", "mock/x")],
+            datasets=["d.yaml"],
+            case_count=1,
+            concurrency=1,
+            max_rounds=2,
+        )
+        path = workdir / "report.html"
+        path.write_text(render_html_report(result), encoding="utf-8")
+        return path
+
+    def test_offline_report_passes(self, workdir: Path) -> None:
+        assert self.checker.check(self.offline_report(workdir)) == []
+
+    def test_cdn_report_is_rejected(self, workdir: Path) -> None:
+        """The exact shape that shipped as a blank page in v0.1.0."""
+        path = workdir / "cdn.html"
+        path.write_text(
+            '<html><head><script src="https://cdn.example.test/echarts.js"></script>'
+            "</head><body>sb-data chart-radar</body></html>",
+            encoding="utf-8",
+        )
+        problems = self.checker.check(path)
+        assert problems, "a CDN-dependent report must be rejected"
+        assert any("remote script" in p for p in problems)
+
+    def test_report_without_data_is_rejected(self, workdir: Path) -> None:
+        path = workdir / "nodata.html"
+        path.write_text("<html>" + "x" * 500_000 + "</html>", encoding="utf-8")
+        problems = self.checker.check(path)
+        assert any("run data is not embedded" in p for p in problems)
+
+    def test_suspiciously_small_report_is_rejected(self, workdir: Path) -> None:
+        path = workdir / "tiny.html"
+        path.write_text("<html><body>sb-data chart-radar</body></html>", encoding="utf-8")
+        problems = self.checker.check(path)
+        assert any("not inlined" in p for p in problems)
+
+    def test_missing_file_is_reported(self, workdir: Path) -> None:
+        problems = self.checker.check(workdir / "absent.html")
+        assert any("no such report" in p for p in problems)
+
+    def test_cli_exit_codes(self, workdir: Path) -> None:
+        assert self.checker.main(["check", str(self.offline_report(workdir))]) == 0
+
+        bad = workdir / "bad.html"
+        bad.write_text("<html></html>", encoding="utf-8")
+        assert self.checker.main(["check", str(bad)]) == 1
+        assert self.checker.main(["check"]) == 2
+
+    def test_cli_output_names_the_problem(self, workdir: Path, capsys) -> None:
+        bad = workdir / "bad.html"
+        bad.write_text("<html></html>", encoding="utf-8")
+        self.checker.main(["check", str(bad)])
+        assert "FAIL" in capsys.readouterr().out

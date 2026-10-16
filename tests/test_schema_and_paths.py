@@ -8,6 +8,8 @@ strictness matrix is pinned here case by case.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -27,6 +29,9 @@ from structbench.schema_builder import (
     build_annotation,
     compile_schema,
 )
+
+#: Repository root, for asserting on packaging configuration.
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def validates(schema: dict, value) -> bool:
@@ -392,6 +397,34 @@ class TestReporters:
         assert "\\u003c" in html or "<" not in html.split("sb-data")[1][:2000]
         assert "echarts" in html
 
+    def test_report_needs_no_network_by_default(self) -> None:
+        """A downloaded report must render with the network unplugged.
+
+        This is the artifact a Release user double-clicks, so a CDN reference means a
+        blank page for anyone offline. The first release shipped exactly that, so the
+        default is now the vendored, inlined library.
+        """
+        html = render_html_report(sample_result())
+        external = re.findall(r'<script[^>]+src="(https?://[^"]+)"', html)
+        assert not external, f"report references a CDN and will not render offline: {external}"
+        assert "cdn.jsdelivr.net" not in html
+        # The library is actually inlined, not merely absent.
+        assert len(html) > 400_000, "the echarts library does not appear to be inlined"
+
+    def test_cdn_mode_is_opt_in_and_small(self) -> None:
+        html = render_html_report(sample_result(), echarts_src="https://example.test/echarts.js")
+        assert "https://example.test/echarts.js" in html
+        assert len(html) < 200_000, "CDN mode should not inline the library"
+        # Nothing is inlined in this mode.
+        assert "window.echarts" not in html
+
+    def test_explicit_bundle_beats_the_vendored_copy(self, workdir) -> None:
+        library = workdir / "echarts.min.js"
+        library.write_text("window.echarts = 'my build';", encoding="utf-8")
+        html = render_html_report(sample_result(), inline_echarts=library)
+        assert "my build" in html
+        assert "cdn.jsdelivr.net" not in html
+
     def test_html_report_escapes_script_terminators(self) -> None:
         result = sample_result()
         result.records[0].attempts[0].raw_text = "</script><script>alert(1)</script>"
@@ -404,19 +437,28 @@ class TestReporters:
         assert written.is_file()
         assert written.read_text(encoding="utf-8").startswith("<!DOCTYPE html>")
 
-    def test_html_report_embeds_a_local_echarts_bundle(self, workdir) -> None:
-        library = workdir / "echarts.min.js"
-        library.write_text(
-            "window.echarts = {init: function () { return {setOption: function () {}}; }};",
-            encoding="utf-8",
-        )
-        html = render_html_report(sample_result(), inline_echarts=library)
-        assert "window.echarts" in html
-        assert "cdn.jsdelivr.net" not in html
-
     def test_missing_echarts_bundle_is_reported(self, workdir) -> None:
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(FileNotFoundError, match="echarts bundle not found"):
             render_html_report(sample_result(), inline_echarts=workdir / "absent.js")
+
+    def test_vendored_echarts_is_a_real_library(self) -> None:
+        """The bundled copy must be genuine JS, not a truncated or error download."""
+        from structbench.reporter.html import VENDORED_ECHARTS, echarts_library_text
+
+        assert VENDORED_ECHARTS.is_file(), "the vendored echarts is missing"
+        text = echarts_library_text()
+        assert len(text) > 500_000, "vendored library looks truncated"
+        assert "echarts" in text.lower()
+        # Apache-2.0 licence header, kept for attribution.
+        assert "Apache Software Foundation" in text[:1000] or "Apache License" in text[:2000]
+
+    def test_vendored_echarts_is_shipped_in_the_wheel(self) -> None:
+        """A missing vendor file would silently reintroduce the CDN dependency."""
+        text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        assert 'packages = ["src/structbench"]' in text, (
+            "the package directory must be included wholesale, which is what carries "
+            "reporter/vendor/ into the wheel"
+        )
 
     def test_payload_embeds_dataset_references_when_given(self) -> None:
         from tests import _data

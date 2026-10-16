@@ -1,12 +1,16 @@
 """Single-file interactive HTML report (Jinja2 + ECharts).
 
 The output is one self-contained ``report.html``: the run archive is embedded as
-JSON and every chart is drawn client-side, so the file can be committed to a
-repository, attached to a PR or opened straight off disk.
+JSON, the charting library is inlined, and every chart is drawn client-side. That
+means the file works when opened straight off disk, with no network at all -- which
+matters because this is the artifact people download from a Release and
+double-click, and a report that silently needs a CDN renders as a blank page for
+anyone offline.
 
-ECharts itself is loaded from a CDN by default, which keeps the file small. For a
-fully offline artifact pass ``--inline-echarts path/to/echarts.min.js`` and the
-library is inlined instead.
+A vendored copy of ECharts ships in ``reporter/vendor/`` for exactly this reason.
+``--echarts-src URL`` opts back into the CDN for a much smaller file, and
+``--inline-echarts PATH`` inlines a different build (for example a newer release,
+or a mirror when the CDN is unreachable).
 """
 
 from __future__ import annotations
@@ -30,12 +34,18 @@ from structbench.models import (
 
 __all__ = [
     "DEFAULT_ECHARTS_SRC",
+    "VENDORED_ECHARTS",
     "build_payload",
+    "echarts_library_text",
     "render_html_report",
     "write_html_report",
 ]
 
+#: CDN location, used only when the caller explicitly asks for a remote library.
 DEFAULT_ECHARTS_SRC = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"
+
+#: The copy bundled with StructBench, inlined by default so the report is offline.
+VENDORED_ECHARTS = Path(__file__).resolve().parent / "vendor" / "echarts.min.js"
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent
 
@@ -277,17 +287,38 @@ def _dist_items(value: Any) -> list[tuple[str, int]]:
     return []
 
 
+def echarts_library_text(path: str | Path | None = None) -> str:
+    """Read the JavaScript to inline into the report.
+
+    Defaults to the copy vendored inside the package, so a report is offline-capable
+    without the caller doing anything.
+    """
+    library_path = Path(path) if path is not None else VENDORED_ECHARTS
+    if not library_path.is_file():
+        raise FileNotFoundError(
+            f"echarts bundle not found: {library_path}. Pass --echarts-src URL to load "
+            "it from a CDN instead, or --inline-echarts PATH to supply your own build."
+        )
+    return library_path.read_text(encoding="utf-8")
+
+
 def render_html_report(
     result: RunResult,
     *,
     cases: Sequence[Case] | None = None,
     title: str | None = None,
-    echarts_src: str = DEFAULT_ECHARTS_SRC,
+    echarts_src: str | None = None,
     inline_echarts: str | Path | None = None,
+    offline: bool = True,
     max_raw_chars: int = DEFAULT_MAX_RAW_CHARS,
     max_failures: int = DEFAULT_MAX_FAILURES,
 ) -> str:
-    """Render the report to a string."""
+    """Render the report to a string.
+
+    The library is inlined by default (``offline=True``), which is the behaviour a
+    downloaded artifact needs. Pass ``echarts_src="https://..."`` for a smaller file
+    that requires network access, or ``offline=False`` for the same thing.
+    """
     payload = build_payload(
         result,
         cases=cases,
@@ -297,12 +328,18 @@ def render_html_report(
     )
 
     echarts_library = ""
+    remote_src = echarts_src or ""
+
     if inline_echarts is not None:
-        library_path = Path(inline_echarts)
-        if not library_path.is_file():
-            raise FileNotFoundError(f"echarts bundle not found: {library_path}")
-        echarts_library = library_path.read_text(encoding="utf-8")
-        echarts_src = ""
+        # An explicit local build always wins.
+        echarts_library = echarts_library_text(inline_echarts)
+        remote_src = ""
+    elif offline and not echarts_src:
+        echarts_library = echarts_library_text()
+        remote_src = ""
+    elif not remote_src:
+        # offline=False without an explicit URL: fall back to the CDN.
+        remote_src = DEFAULT_ECHARTS_SRC
 
     # ``</script>`` inside the JSON would terminate the host script block early.
     data_json = json.dumps(payload, ensure_ascii=False, default=str).replace("<", "\\u003c")
@@ -311,7 +348,7 @@ def render_html_report(
     return template.render(
         data_json=data_json,
         title=payload["title"],
-        echarts_src=echarts_src,
+        echarts_src=remote_src,
         echarts_inline=echarts_library,
         meta=payload,
     )

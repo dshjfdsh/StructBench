@@ -6,6 +6,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The HTML report rendered as a blank page without a network.** It loaded ECharts
+  from a CDN, so the file people download from a Release and double-click showed
+  nothing when offline or when the CDN is unreachable. The library is now vendored
+  into `reporter/vendor/` and inlined by default, so `report.html` is genuinely
+  self-contained. `--echarts-src URL` opts back into the CDN for a much smaller
+  artifact (about 27 KB instead of 1.2 MB) when network access is acceptable.
+- The Release body linked charts at `/releases/download/...`, which GitHub serves
+  as `application/octet-stream` with `Content-Disposition: attachment` — a
+  broken image, not an inline one. Charts are now linked from the tagged commit via
+  `raw.githubusercontent.com`, which serves `image/svg+xml`.
+- Legend text overlapped in the error-taxonomy chart. Legend items were packed by
+  `len(text) * 6.6px`, measuring every character as ASCII, but CJK ideographs render
+  at roughly full-em width — so the Chinese labels were under-measured by 24–47px
+  each and ran into one another. `_text_width` now measures per character, and the
+  bottom padding grows with the wrapped legend row count instead of overflowing.
+
+### Added
+
+- A README section explaining which Release assets matter: the wheel installs the
+  tool *and* the bundled 86-case suite, `report.html` is the offline visualisation,
+  and the `run-*.json` archives are the raw data behind the charts.
+
 ## [0.1.0] — 2025-10-16
 
 First public release: a complete, runnable micro-benchmark for structured output
