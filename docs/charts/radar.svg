@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="560" viewBox="0 0 880 560" role="img" aria-labelledby="sb-title sb-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+<title id="sb-title">Dimension profile — 86 cases · v0.1.0</title>
+<desc id="sb-desc">7 model(s) across 4 dimensions: Deep nesting, Escape hell, Tool hallucination, Edge types</desc>
+<rect width="880" height="560" fill="#ffffff"/>
+<text x="440" y="30" text-anchor="middle" font-size="15" font-weight="600" fill="#1c2430">Dimension profile — 86 cases · v0.1.0</text>
+<polygon points="440.00,222.50 481.50,264.00 440.00,305.50 398.50,264.00" fill="none" stroke="#e3e8ef" stroke-width="1"/>
+<text x="446.0" y="226.5" font-size="10" fill="#9aa4b2">25</text>
+<polygon points="440.00,181.00 523.00,264.00 440.00,347.00 357.00,264.00" fill="none" stroke="#e3e8ef" stroke-width="1"/>
+<text x="446.0" y="185.0" font-size="10" fill="#9aa4b2">50</text>
+<polygon points="440.00,139.50 564.50,264.00 440.00,388.50 315.50,264.00" fill="none" stroke="#e3e8ef" stroke-width="1"/>
+<text x="446.0" y="143.5" font-size="10" fill="#9aa4b2">75</text>
+<polygon points="440.00,98.00 606.00,264.00 440.00,430.00 274.00,264.00" fill="none" stroke="#e3e8ef" stroke-width="1"/>
+<text x="446.0" y="102.0" font-size="10" fill="#9aa4b2">100</text>
+<line x1="440.00" y1="264.00" x2="440.00" y2="98.00" stroke="#e3e8ef" stroke-width="1"/>
+<line x1="440.00" y1="264.00" x2="606.00" y2="264.00" stroke="#e3e8ef" stroke-width="1"/>
+<line x1="440.00" y1="264.00" x2="440.00" y2="430.00" stroke="#e3e8ef" stroke-width="1"/>
+<line x1="440.00" y1="264.00" x2="274.00" y2="264.00" stroke="#e3e8ef" stroke-width="1"/>
+<text x="440.0" y="82.0" text-anchor="middle" font-size="12.5" font-weight="500" fill="#3d4756">Deep nesting</text>
+<text x="626.0" y="268.0" text-anchor="start" font-size="12.5" font-weight="500" fill="#3d4756">Escape hell</text>
+<text x="440.0" y="454.0" text-anchor="middle" font-size="12.5" font-weight="500" fill="#3d4756">Tool hallucination</text>
+<text x="254.0" y="268.0" text-anchor="end" font-size="12.5" font-weight="500" fill="#3d4756">Edge types</text>
+<polygon points="440.00,98.00 606.00,264.00 440.00,430.00 274.00,264.00" fill="#2f6fed" fill-opacity="0.10" stroke="#2f6fed" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="440.00" cy="98.00" r="3" fill="#ffffff" stroke="#2f6fed" stroke-width="1.8"/>
+<circle cx="606.00" cy="264.00" r="3" fill="#ffffff" stroke="#2f6fed" stroke-width="1.8"/>
+<circle cx="440.00" cy="430.00" r="3" fill="#ffffff" stroke="#2f6fed" stroke-width="1.8"/>
+<circle cx="274.00" cy="264.00" r="3" fill="#ffffff" stroke="#2f6fed" stroke-width="1.8"/>
+<polygon points="440.00,120.58 590.89,264.00 440.00,399.79 282.30,264.00" fill="#16a34a" fill-opacity="0.10" stroke="#16a34a" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="440.00" cy="120.58" r="3" fill="#ffffff" stroke="#16a34a" stroke-width="1.8"/>
+<circle cx="590.89" cy="264.00" r="3" fill="#ffffff" stroke="#16a34a" stroke-width="1.8"/>
+<circle cx="440.00" cy="399.79" r="3" fill="#ffffff" stroke="#16a34a" stroke-width="1.8"/>
+<circle cx="282.30" cy="264.00" r="3" fill="#ffffff" stroke="#16a34a" stroke-width="1.8"/>
+<polygon points="440.00,113.11 507.89,264.00 440.00,407.42 282.30,264.00" fill="#d97706" fill-opacity="0.10" stroke="#d97706" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="440.00" cy="113.11" r="3" fill="#ffffff" stroke="#d97706" stroke-width="1.8"/>
+<circle cx="507.89" cy="264.00" r="3" fill="#ffffff" stroke="#d97706" stroke-width="1.8"/>
+<circle cx="440.00" cy="407.42" r="3" fill="#ffffff" stroke="#d97706" stroke-width="1.8"/>
+<circle cx="282.30" cy="264.00" r="3" fill="#ffffff" stroke="#d97706" stroke-width="1.8"/>
+<polygon points="440.00,158.42 590.89,264.00 440.00,407.42 373.60,264.00" fill="#9333ea" fill-opacity="0.10" stroke="#9333ea" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="440.00" cy="158.42" r="3" fill="#ffffff" stroke="#9333ea" stroke-width="1.8"/>
+<circle cx="590.89" cy="264.00" r="3" fill="#ffffff" stroke="#9333ea" stroke-width="1.8"/>
+<circle cx="440.00" cy="407.42" r="3" fill="#ffffff" stroke="#9333ea" stroke-width="1.8"/>
+<circle cx="373.60" cy="264.00" r="3" fill="#ffffff" stroke="#9333ea" stroke-width="1.8"/>
+<polygon points="440.00,158.42 575.79,264.00 440.00,331.89 298.90,264.00" fill="#dc2626" fill-opacity="0.10" stroke="#dc2626" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="440.00" cy="158.42" r="3" fill="#ffffff" stroke="#dc2626" stroke-width="1.8"/>
+<circle cx="575.79" cy="264.00" r="3" fill="#ffffff" stroke="#dc2626" stroke-width="1.8"/>
+<circle cx="440.00" cy="331.89" r="3" fill="#ffffff" stroke="#dc2626" stroke-width="1.8"/>
+<circle cx="298.90" cy="264.00" r="3" fill="#ffffff" stroke="#dc2626" stroke-width="1.8"/>
+<polygon points="440.00,150.79 500.42,264.00 440.00,407.42 315.50,264.00" fill="#0891b2" fill-opacity="0.10" stroke="#0891b2" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="440.00" cy="150.79" r="3" fill="#ffffff" stroke="#0891b2" stroke-width="1.8"/>
+<circle cx="500.42" cy="264.00" r="3" fill="#ffffff" stroke="#0891b2" stroke-width="1.8"/>
+<circle cx="440.00" cy="407.42" r="3" fill="#ffffff" stroke="#0891b2" stroke-width="1.8"/>
+<circle cx="315.50" cy="264.00" r="3" fill="#ffffff" stroke="#0891b2" stroke-width="1.8"/>
+<polygon points="440.00,203.58 485.32,264.00 440.00,324.42 373.60,264.00" fill="#65a30d" fill-opacity="0.10" stroke="#65a30d" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="440.00" cy="203.58" r="3" fill="#ffffff" stroke="#65a30d" stroke-width="1.8"/>
+<circle cx="485.32" cy="264.00" r="3" fill="#ffffff" stroke="#65a30d" stroke-width="1.8"/>
+<circle cx="440.00" cy="324.42" r="3" fill="#ffffff" stroke="#65a30d" stroke-width="1.8"/>
+<circle cx="373.60" cy="264.00" r="3" fill="#ffffff" stroke="#65a30d" stroke-width="1.8"/>
+<rect x="61.4" y="518.0" width="12" height="12" rx="3" fill="#2f6fed"/>
+<text x="79.4" y="527.0" font-size="12.5" fill="#3d4756">mock/perfect</text>
+<rect x="176.6" y="518.0" width="12" height="12" rx="3" fill="#16a34a"/>
+<text x="194.6" y="527.0" font-size="12.5" fill="#3d4756">mock/good</text>
+<rect x="272.0" y="518.0" width="12" height="12" rx="3" fill="#d97706"/>
+<text x="290.0" y="527.0" font-size="12.5" fill="#3d4756">mock/escape_phobic</text>
+<rect x="426.8" y="518.0" width="12" height="12" rx="3" fill="#9333ea"/>
+<text x="444.8" y="527.0" font-size="12.5" fill="#3d4756">mock/typing_weak</text>
+<rect x="568.4" y="518.0" width="12" height="12" rx="3" fill="#dc2626"/>
+<text x="586.4" y="527.0" font-size="12.5" fill="#3d4756">mock/tool_butcher</text>
+<rect x="716.6" y="518.0" width="12" height="12" rx="3" fill="#0891b2"/>
+<text x="734.6" y="527.0" font-size="12.5" fill="#3d4756">mock/flaky</text>
+<rect x="392.3" y="538.0" width="12" height="12" rx="3" fill="#65a30d"/>
+<text x="410.3" y="547.0" font-size="12.5" fill="#3d4756">mock/weak</text>
+</svg>

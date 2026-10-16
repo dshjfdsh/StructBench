@@ -11,7 +11,7 @@
 [![CI](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml/badge.svg)](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-315%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-377%20passing-brightgreen.svg)](tests/)
 [![Cases](https://img.shields.io/badge/cases-86%20adversarial-orange.svg)](datasets/)
 [![Judge model](https://img.shields.io/badge/judge%20model-not%20required-success.svg)](#为什么不用-llm-当裁判)
 
@@ -106,6 +106,21 @@ structbench run \
 以下数据由离线模拟器在完整 86 道题上产生，可用
 `structbench run -m mock:perfect,mock:good,mock:flaky,mock:weak,mock:escape_phobic,mock:typing_weak,mock:tool_butcher` 复现。
 
+![Pass@1 与 Heal@1 对比](docs/charts/pass-heal.svg)
+
+**每个模型在被准确告知「错在哪」之后都能提升 15–31 个百分点。** 这个差距正是本项目的核心论点：在 Agent 运行时加一层「校验错误回传重试环」，带来的可靠性提升超过模型自身的首轮表现，而代价仅仅是多一次请求。
+
+![维度能力雷达](docs/charts/radar.svg)
+
+**各模型能力是「偏科」的，而题库能精确定位偏在哪。** `escape_phobic` 是个强模型（总分 77.9%），却在转义场景塌到 40.9%；`typing_weak` 语法没问题，弱在类型系统。一个笼统的总分会把这两者都掩盖掉。
+
+![错误类型分布](docs/charts/taxonomy.svg)
+
+**分数到底丢在哪。** 绿色是合规通过，四种暖色是四类失败。`mock/weak` 单是语法问题就丢了 26 道题——这说明该先修提示词，而不是先换更大的模型。
+
+<details>
+<summary><b>图表背后的数字</b>（点击展开）</summary>
+
 <!-- LEADERBOARD:START -->
 | 模型 | Pass@1 | Heal@1 | Repair | P50 | TTFT p50 | TPS |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -142,9 +157,20 @@ structbench run \
 | `mock/weak` | 7 | **26** | 13 | 10 | 30 |
 <!-- LEADERBOARD:END -->
 
+</details>
+
 > **这些数字是模拟出来的，不是实测的。** 它们的作用是验证评测框架本身、并让报告有个可供对照的形状；它们不代表任何真实模型的能力。一份真实的跨厂商天梯榜需要 API 预算，本仓库不提供——`structbench run` 加上你自己的 key 就能跑出来。
 
-**请看 `Heal@1` 那一列，而不是 Pass@1。** 每个人格在被准确告知「错在哪」之后都能提升 15–31 个百分点。这个差距就是「**与其花钱微调，不如先在 Agent 运行时加一层校验错误回传重试环**」这一论点的量化依据。
+图表由工具本身生成，因此永远不会和数据脱节：
+
+```bash
+structbench run -m mock:perfect,mock:good,mock:flaky,mock:weak,mock:escape_phobic,mock:typing_weak,mock:tool_butcher \
+                --charts docs/charts
+# 或从已保存的归档重新生成：
+structbench chart results/run-*.json -o docs/charts
+```
+
+交互式版本在 `results/report.html`，额外提供一个可筛选的浏览器——左边是模型的真实输出，右边是 Schema 期望。
 
 ---
 
@@ -222,7 +248,8 @@ Pydantic 默认的宽松模式会把 `"123"` 悄悄强转成 `123`，这等于�
 
 ```text
 structbench run        对一到多个模型跑完整套题库
-structbench report     从已保存的归档重新渲染终端/HTML/Markdown 报告
+structbench report     从已保存的归档重新渲染终端/HTML/Markdown/SVG 报告
+structbench chart      从已保存的归档生成静态 SVG 图表
 structbench validate   自检题库（是否有解 + 是否能区分）
 structbench list       列出所有用例
 structbench personas   查看内置离线模拟人格
@@ -240,6 +267,8 @@ structbench providers  列出厂商预置与对应环境变量
 | `--max-rounds` | 每题的尝试预算（`1` 表示关闭自愈）。 |
 | `--fail-under` | Pass@1 低于阈值时以非零码退出——可直接作为 CI 质量门禁。 |
 | `--markdown` | 将天梯榜输出为 Markdown（`-` 表示输出到标准输出）。 |
+| `--charts DIR` | 输出静态 SVG 图表——可直接提交并嵌入 README 的那种。 |
+| `--no-charts` | 跳过终端的条形图摘要，输出更紧凑的日志。 |
 | `--inline-echarts` | 内嵌本地 `echarts.min.js`，生成完全离线的报告。 |
 
 ---
@@ -298,16 +327,21 @@ structbench/
 ├── pyproject.toml              # 依赖声明 + `structbench` 命令行入口
 ├── README.md · README.zh-CN.md · CHANGELOG.md · LICENSE (MIT)
 ├── .github/workflows/ci.yml    # ruff + pytest（3.10–3.13）+ 离线 demo 跑分
+├── .github/workflows/release.yml  # 打 tag → 自动建 GitHub Release + 图表 + 分发包
 ├── datasets/                   # 核心资产：题库本体
 │   ├── 01_deep_nesting.yaml    #  22 道
 │   ├── 02_escape_hell.yaml     #  22 道
 │   ├── 03_tool_hallucination.yaml  #  22 道
 │   └── 04_edge_types.yaml      #  20 道
-├── scripts/selfcheck.py        # 独立的题库校验脚本
-├── scripts/ci_gate.py          # CI 验收门禁（框架自洽性）
-├── scripts/check_deps.py       # 依赖可解析性预检
+├── docs/charts/                # 提交进仓库的 SVG 图表，被两版 README 内嵌
+├── scripts/
+│   ├── selfcheck.py            # 独立的题库校验脚本
+│   ├── make_charts.py          # 重新生成提交进仓库的图表
+│   ├── ci_gate.py              # CI 验收门禁（框架自洽性）
+│   ├── check_deps.py           # 依赖可解析性预检
+│   └── check_readmes.py        # 保持多语言 README 同步
 ├── src/structbench/
-│   ├── cli.py                  # Typer 命令行（run/report/validate/list/personas/providers）
+│   ├── cli.py                  # Typer 命令行（run/report/chart/validate/list/personas/providers）
 │   ├── evaluator.py            # 提取 → AST 解析 → 校验 → 归因
 │   ├── schema_builder.py       # JSON Schema → 严格 Pydantic v2 校验器
 │   ├── runner.py               # 异步并发池、并发控制 + 限流
@@ -319,8 +353,13 @@ structbench/
 │   ├── synth.py · regexgen.py  # 合规取值合成（驱动 mock 与自检）
 │   ├── jsonpath.py             # ground truth 使用的 JSONPath 子集
 │   ├── providers/              # OpenAI 兼容客户端 + 离线模拟器
-│   └── reporter/               # Rich 终端、Markdown、ECharts HTML 模板
-└── tests/                      # 315 项测试
+│   └── reporter/
+│       ├── console.py          # Rich 表格 + 终端条形图
+│       ├── svg.py              # 零依赖 SVG 图表原语
+│       ├── charts.py           # RunResult → 提交进仓库的图表集
+│       ├── html.py             # 单文件交互式报告的数据组装
+│       └── template.html       # ECharts 雷达图/错误分布/失败浏览器模板
+└── tests/                      # 377 项测试
 ```
 
 ---
@@ -329,7 +368,7 @@ structbench/
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 315 项测试
+pytest -q                       # 377 项测试
 ruff check . && ruff format --check .
 structbench validate            # 题库完整性
 ```

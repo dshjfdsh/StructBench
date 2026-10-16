@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="459" viewBox="0 0 880 459" role="img" aria-labelledby="sb-title sb-desc" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif">
+<title id="sb-title">Pass@1 vs Heal@1 — 86 cases · v0.1.0</title>
+<desc id="sb-desc">2 series across 7 categories</desc>
+<rect width="880" height="459" fill="#ffffff"/>
+<text x="440" y="30" text-anchor="middle" font-size="15" font-weight="600" fill="#1c2430">Pass@1 vs Heal@1 — 86 cases · v0.1.0</text>
+<line x1="70.0" y1="363.0" x2="856.0" y2="363.0" stroke="#eef2f7" stroke-width="1"/>
+<text x="60.0" y="367.0" text-anchor="end" font-size="11" fill="#8a94a6">0%</text>
+<line x1="70.0" y1="303.2" x2="856.0" y2="303.2" stroke="#eef2f7" stroke-width="1"/>
+<text x="60.0" y="307.2" text-anchor="end" font-size="11" fill="#8a94a6">20%</text>
+<line x1="70.0" y1="243.4" x2="856.0" y2="243.4" stroke="#eef2f7" stroke-width="1"/>
+<text x="60.0" y="247.4" text-anchor="end" font-size="11" fill="#8a94a6">40%</text>
+<line x1="70.0" y1="183.6" x2="856.0" y2="183.6" stroke="#eef2f7" stroke-width="1"/>
+<text x="60.0" y="187.6" text-anchor="end" font-size="11" fill="#8a94a6">60%</text>
+<line x1="70.0" y1="123.8" x2="856.0" y2="123.8" stroke="#eef2f7" stroke-width="1"/>
+<text x="60.0" y="127.8" text-anchor="end" font-size="11" fill="#8a94a6">80%</text>
+<line x1="70.0" y1="64.0" x2="856.0" y2="64.0" stroke="#eef2f7" stroke-width="1"/>
+<text x="60.0" y="68.0" text-anchor="end" font-size="11" fill="#8a94a6">100%</text>
+<text x="18" y="214" text-anchor="middle" font-size="11.5" fill="#8a94a6" transform="rotate(-90 18 214)">pass rate (%)</text>
+<rect x="82.35" y="64.00" width="42.29" height="299.00" fill="#2f6fed" rx="2.5"/>
+<text x="103.50" y="59.00" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">100.0%</text>
+<rect x="127.64" y="64.00" width="42.29" height="299.00" fill="#16a34a" rx="2.5"/>
+<text x="148.79" y="59.00" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">100.0%</text>
+<text x="126.14" y="381.0" text-anchor="middle" font-size="12" fill="#3d4756">mock/perfect</text>
+<rect x="194.64" y="98.68" width="42.29" height="264.32" fill="#2f6fed" rx="2.5"/>
+<text x="215.78" y="93.68" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">88.4%</text>
+<rect x="239.93" y="64.00" width="42.29" height="299.00" fill="#16a34a" rx="2.5"/>
+<text x="261.07" y="59.00" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">100.0%</text>
+<text x="238.43" y="381.0" text-anchor="middle" font-size="12" fill="#3d4756">mock/good</text>
+<rect x="306.92" y="130.08" width="42.29" height="232.92" fill="#2f6fed" rx="2.5"/>
+<text x="328.07" y="125.08" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">77.9%</text>
+<rect x="352.21" y="81.34" width="42.29" height="281.66" fill="#16a34a" rx="2.5"/>
+<text x="373.36" y="76.34" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">94.2%</text>
+<text x="350.71" y="381.0" text-anchor="middle" font-size="12" fill="#3d4756">mock/escape_phobic</text>
+<rect x="419.21" y="151.01" width="42.29" height="211.99" fill="#2f6fed" rx="2.5"/>
+<text x="440.35" y="146.01" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">70.9%</text>
+<rect x="464.50" y="84.93" width="42.29" height="278.07" fill="#16a34a" rx="2.5"/>
+<text x="485.65" y="79.93" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">93.0%</text>
+<text x="463.00" y="381.0" text-anchor="middle" font-size="12" fill="#3d4756">mock/typing_weak</text>
+<rect x="531.49" y="161.47" width="42.29" height="201.53" fill="#2f6fed" rx="2.5"/>
+<text x="552.64" y="156.47" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">67.4%</text>
+<rect x="576.79" y="88.22" width="42.29" height="274.78" fill="#16a34a" rx="2.5"/>
+<text x="597.93" y="83.22" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">91.9%</text>
+<text x="575.29" y="381.0" text-anchor="middle" font-size="12" fill="#3d4756">mock/tool_butcher</text>
+<rect x="643.78" y="164.76" width="42.29" height="198.24" fill="#2f6fed" rx="2.5"/>
+<text x="664.93" y="159.76" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">66.3%</text>
+<rect x="689.07" y="78.05" width="42.29" height="284.95" fill="#16a34a" rx="2.5"/>
+<text x="710.22" y="73.05" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">95.3%</text>
+<text x="687.57" y="381.0" text-anchor="middle" font-size="12" fill="#3d4756">mock/flaky</text>
+<rect x="756.07" y="258.65" width="42.29" height="104.35" fill="#2f6fed" rx="2.5"/>
+<text x="777.21" y="253.65" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">34.9%</text>
+<rect x="801.36" y="164.76" width="42.29" height="198.24" fill="#16a34a" rx="2.5"/>
+<text x="822.50" y="159.76" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">66.3%</text>
+<text x="799.86" y="381.0" text-anchor="middle" font-size="12" fill="#3d4756">mock/weak</text>
+<line x1="70.0" y1="363.0" x2="856.0" y2="363.0" stroke="#cbd5e1" stroke-width="1.2"/>
+<rect x="364.4" y="437.0" width="12" height="12" rx="3" fill="#2f6fed"/>
+<text x="382.4" y="446.0" font-size="12.5" fill="#3d4756">Pass@1</text>
+<rect x="440.0" y="437.0" width="12" height="12" rx="3" fill="#16a34a"/>
+<text x="458.0" y="446.0" font-size="12.5" fill="#3d4756">Heal@1</text>
+</svg>

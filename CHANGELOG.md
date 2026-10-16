@@ -6,6 +6,41 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+**Static SVG charts** (`structbench.reporter.svg`, `structbench.reporter.charts`)
+- Dependency-free SVG rendering: radar, grouped bar and stacked bar charts written
+  by hand, so the project keeps its zero-heavyweight-dependency rule and the output
+  is byte-stable enough to commit.
+- `structbench chart <archive> -o DIR` and `run --charts DIR` write the chart set
+  (`radar.svg`, `pass-heal.svg`, `taxonomy.svg`).
+- These exist because the interactive HTML report cannot help on GitHub: a README
+  or Release description cannot embed a `<script>`, so the charts a visitor
+  actually sees have to be static images. All three are now embedded in both
+  READMEs.
+- Charts record the run they came from in their title, so a committed image is
+  never unverifiable.
+
+**Terminal visualisation** (`structbench.reporter.console`)
+- `render_report` now prints bar-chart summaries alongside the tables: Pass@1,
+  Heal@1, repair rate, and the weakest model's per-dimension profile. Tables answer
+  "what is the number?"; bars answer "how do these compare?", which is the question
+  a leaderboard is actually asked. Disable with `--no-charts`.
+
+**Automated releases** (`.github/workflows/release.yml`, `scripts/release_notes.py`)
+- Pushing a `v*` tag verifies the suite, regenerates the charts from a real run,
+  builds sdist + wheel, install-tests the wheel, and publishes a GitHub Release via
+  the `gh` CLI. A tag containing a hyphen is published as a pre-release.
+- `scripts/release_notes.py` composes the release body from the CHANGELOG section
+  for that version plus the generated charts, and refuses to run if a chart it
+  would link to is missing.
+
+**Test and verification tooling**
+- `tests/svg_raster.py`: a standard-library SVG rasteriser, so the suite can prove
+  a chart is not blank without a browser or a plotting library.
+- `scripts/render_svg.py`: renders SVGs to PNG for human inspection.
+- `scripts/make_charts.py`: regenerates the committed chart set from an archive.
+
 ## [0.1.0] — 2025-10-16
 
 First public release: a complete, runnable micro-benchmark for structured output

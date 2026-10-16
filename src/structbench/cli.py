@@ -3,7 +3,8 @@
 Commands
 --------
 ``run``       execute the benchmark against one or more models
-``report``    re-render the console/HTML report from a saved run archive
+``report``    re-render the console/HTML/Markdown/SVG output from a saved archive
+``chart``     write static SVG charts from a saved archive
 ``validate``  self-check the datasets (every case satisfiable and discriminating)
 ``list``      enumerate the bundled cases
 ``personas``  describe the offline simulator personas
@@ -41,7 +42,13 @@ from structbench.models import (
     parse_model_spec,
 )
 from structbench.providers import PERSONA_NAMES, PERSONAS, ProviderConfigError, ProviderOptions
-from structbench.reporter import render_markdown, render_report, write_html_report
+from structbench.reporter import (
+    ChartError,
+    render_markdown,
+    render_report,
+    write_charts,
+    write_html_report,
+)
 from structbench.runner import RunConfig, Runner
 from structbench.selfcheck import check_cases
 
@@ -111,6 +118,14 @@ def _write_markdown(result: RunResult, path: Path, *, title: str | None = None) 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body, encoding="utf-8")
     return path
+
+
+def _write_charts(result: RunResult, directory: Path, *, title: str | None = None) -> dict:
+    """Render the static SVG chart set into ``directory``."""
+    subtitle = f"{result.case_count} cases · v{result.structbench_version}"
+    if title:
+        subtitle = f"{title} · {subtitle}"
+    return write_charts(result, directory, subtitle=subtitle)
 
 
 @app.callback()
@@ -216,6 +231,17 @@ def run_command(
         Path | None,
         typer.Option("--markdown", help="Also write a Markdown leaderboard ('-' for stdout)."),
     ] = None,
+    charts: Annotated[
+        Path | None,
+        typer.Option(
+            "--charts",
+            help="Also write static SVG charts (radar, pass-heal, taxonomy) into this directory.",
+        ),
+    ] = None,
+    no_charts: Annotated[
+        bool,
+        typer.Option("--no-charts", help="Skip the terminal bar-chart summary."),
+    ] = False,
     inline_echarts: Annotated[
         Path | None,
         typer.Option("--inline-echarts", help="Path to echarts.min.js to embed (offline report)."),
@@ -341,7 +367,7 @@ def run_command(
             raise typer.Exit(EXIT_INTERRUPTED) from None
 
     console.print()
-    render_report(result, console, show_failures=show_failures)
+    render_report(result, console, show_failures=show_failures, show_charts=not no_charts)
 
     artifacts: list[Path] = []
     output.mkdir(parents=True, exist_ok=True)
@@ -369,6 +395,9 @@ def run_command(
         written = _write_markdown(result, markdown, title=title)
         if written is not None:
             artifacts.append(written)
+
+    if charts is not None:
+        artifacts.extend(_write_charts(result, charts, title=title).values())
 
     console.print()
     for path in artifacts:
@@ -415,6 +444,10 @@ def report_command(
     markdown: Annotated[
         Path | None,
         typer.Option("--markdown", help="Also write a Markdown leaderboard ('-' for stdout)."),
+    ] = None,
+    charts: Annotated[
+        Path | None,
+        typer.Option("--charts", help="Also write the static SVG charts into this directory."),
     ] = None,
     print_console: Annotated[
         bool, typer.Option("--console/--no-console", help="Also print the terminal report.")
@@ -467,6 +500,75 @@ def report_command(
         written = _write_markdown(result, markdown, title=title)
         if written is not None:
             console.print(f"[green]✓[/green] wrote [bold]{written}[/bold]")
+
+    if charts is not None:
+        for path in _write_charts(result, charts, title=title).values():
+            console.print(f"[green]✓[/green] wrote [bold]{path}[/bold]")
+
+
+# --------------------------------------------------------------------------- #
+# chart
+# --------------------------------------------------------------------------- #
+
+
+@app.command("chart")
+def chart_command(
+    archive: Annotated[
+        Path, typer.Argument(help="Run archive JSON produced by `structbench run`.")
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Directory for the SVG files.")
+    ] = Path("charts"),
+    title: Annotated[str | None, typer.Option("--title", help="Chart title prefix.")] = None,
+    width: Annotated[int, typer.Option("--width", help="Canvas width in pixels.")] = 880,
+    height: Annotated[int, typer.Option("--height", help="Canvas height in pixels.")] = 560,
+) -> None:
+    """Write static SVG charts from a saved run archive.
+
+    SVG is the format that works where the interactive HTML report cannot: GitHub
+    renders a committed ``.svg`` inline in a README or a Release description, so
+    these are the charts a visitor to the repository actually sees.
+    """
+    if not archive.is_file():
+        err_console.print(Text(f"no such archive: {archive}", style="bold red"))
+        raise typer.Exit(EXIT_CONFIG_ERROR)
+
+    try:
+        result = RunResult.model_validate_json(archive.read_text(encoding="utf-8"))
+    except Exception as exc:
+        err_console.print(
+            Panel(
+                Text(f"{archive} is not a valid StructBench archive: {exc}", style="bold red"),
+                border_style="red",
+            )
+        )
+        raise typer.Exit(EXIT_CONFIG_ERROR) from None
+
+    if not result.models:
+        err_console.print(Text("the archive contains no model scorecards", style="bold red"))
+        raise typer.Exit(EXIT_CONFIG_ERROR)
+
+    try:
+        written = write_charts(
+            result, output, width=width, height=height, subtitle=title or _chart_subtitle(result)
+        )
+    except ChartError as exc:
+        err_console.print(
+            Panel(Text(str(exc), style="bold red"), title="chart error", border_style="red")
+        )
+        raise typer.Exit(EXIT_CONFIG_ERROR) from None
+
+    for name, path in written.items():
+        console.print(
+            f"[green]✓[/green] [bold]{name}[/bold] → {path} ({path.stat().st_size:,} bytes)"
+        )
+    console.print(
+        f"\n[dim]Embed in Markdown:[/dim] ![dimension profile]({written['radar'].as_posix()})"
+    )
+
+
+def _chart_subtitle(result: RunResult) -> str:
+    return f"{result.case_count} cases · v{result.structbench_version}"
 
 
 # --------------------------------------------------------------------------- #

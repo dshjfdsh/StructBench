@@ -7,6 +7,8 @@ place where a rate is computed (:mod:`structbench.metrics`).
 
 from __future__ import annotations
 
+from typing import Any
+
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
@@ -32,6 +34,8 @@ __all__ = [
     "render_markdown",
     "render_report",
     "render_text_report",
+    "score_bars",
+    "visual_summary",
 ]
 
 _LABEL_STYLE = {
@@ -307,8 +311,14 @@ def render_report(
     console: Console,
     *,
     show_failures: int = 8,
+    show_charts: bool = True,
 ) -> None:
-    """Print the whole console report."""
+    """Print the whole console report.
+
+    ``show_charts`` prints the bar-chart summary alongside the tables. It is on by
+    default because the bars are what make a leaderboard readable at a glance; pass
+    ``False`` for a compact, machine-friendly log.
+    """
     header = Text()
     header.append("StructBench ", style="bold white")
     header.append(f"v{result.structbench_version}", style="dim")
@@ -320,6 +330,10 @@ def render_report(
     )
     header.append(f"datasets: {', '.join(result.datasets) or '—'}", style="dim")
     console.print(Panel(header, border_style="cyan", expand=False))
+
+    if show_charts:
+        console.print(visual_summary(result))
+        console.print()
 
     console.print(leaderboard_table(result))
     console.print()
@@ -334,7 +348,7 @@ def render_report(
         console.print(failure_table(result, score.model, limit=show_failures))
 
 
-def render_text_report(result: RunResult) -> str:
+def render_text_report(result: RunResult, *, show_charts: bool = True) -> str:
     """Plain-text rendering, for piping into a file or a CI log."""
     console = Console(
         record=True,
@@ -343,7 +357,7 @@ def render_text_report(result: RunResult) -> str:
         no_color=True,
         legacy_windows=False,
     )
-    render_report(result, console)
+    render_report(result, console, show_charts=show_charts)
     return console.export_text()
 
 
@@ -351,6 +365,117 @@ def _markdown_rate(rate: float | None) -> str:
     if rate is None:
         return "n/a"
     return f"{rate * 100:.1f}%"
+
+
+def score_bars(
+    label: str,
+    values: list[tuple[str, float | None]],
+    *,
+    width: int = 34,
+    suffix: str = "%",
+    max_value: float = 100.0,
+) -> Table:
+    """A horizontal bar chart for the terminal.
+
+    Terminal tables answer "what is the number?"; a bar answers "how do these
+    compare?", which is the question a leaderboard is actually asked. Both are
+    printed because they serve different purposes -- the table for precision, the
+    bar for shape.
+    """
+    table = Table(
+        title=label,
+        title_style="bold cyan",
+        header_style="bold",
+        pad_edge=False,
+        show_header=False,
+        box=None,
+    )
+    table.add_column("Model", no_wrap=True, min_width=18)
+    table.add_column("Bar", no_wrap=True)
+    table.add_column("Value", justify="right", no_wrap=True)
+
+    for name, value in values:
+        if value is None:
+            table.add_row(name, Text("·" * min(width, 12), style="dim"), Text("n/a", style="dim"))
+            continue
+        fraction = max(0.0, min(value / max_value, 1.0)) if max_value else 0.0
+        filled = round(fraction * width)
+        colour = _bar_colour(value, max_value)
+        bar = Text("█" * filled, style=colour) + Text("░" * (width - filled), style="grey37")
+        table.add_row(name, bar, Text(f"{value:.1f}{suffix}", style=colour))
+    return table
+
+
+def _bar_colour(value: float, max_value: float) -> str:
+    """Green for strong, red for weak, relative to the axis maximum."""
+    if max_value <= 0:
+        return "white"
+    ratio = value / max_value
+    if ratio >= 0.9:
+        return "bold green"
+    if ratio >= 0.75:
+        return "green"
+    if ratio >= 0.6:
+        return "yellow"
+    if ratio >= 0.4:
+        return "dark_orange"
+    return "bold red"
+
+
+def visual_summary(result: RunResult, *, bar_width: int = 34) -> Group:
+    """The chart-like half of the terminal report.
+
+    Three views, chosen because they are the ones a reader actually reasons about:
+    Pass@1 versus Heal@1 (the headline claim), the per-dimension profile (where the
+    weakness is), and the failure composition (why it is weak).
+    """
+    ranked = sorted(result.models, key=lambda item: -item.pass_at_1_rate)
+
+    pass_bars = score_bars(
+        "Pass@1 — first attempt only",
+        [(score.model, score.pass_at_1_rate * 100.0) for score in ranked],
+        width=bar_width,
+    )
+    heal_bars = score_bars(
+        "Heal@1 — after the validation error is replayed",
+        [(score.model, score.heal_at_1_rate * 100.0) for score in ranked],
+        width=bar_width,
+    )
+    repair_bars = score_bars(
+        "Repair rate — of the cases it broke, how many did it fix?",
+        [
+            (score.model, None if score.repair_rate is None else score.repair_rate * 100.0)
+            for score in ranked
+        ],
+        width=bar_width,
+    )
+
+    # Per-dimension profile, so a model's weak spot is visible without reading a
+    # matrix of numbers.
+    categories: list[str] = []
+    for score in result.models:
+        for block in score.by_category:
+            if block.category not in categories:
+                categories.append(block.category)
+
+    blocks: list[Any] = [pass_bars, heal_bars, repair_bars]
+    if categories:
+        worst = min(
+            result.models,
+            key=lambda item: min((block.pass_at_1_rate for block in item.by_category), default=1.0),
+        )
+        blocks.append(
+            score_bars(
+                f"Dimension profile — {worst.model} (the weakest model)",
+                [
+                    (block.category, block.pass_at_1_rate * 100.0)
+                    for block in sorted(worst.by_category, key=lambda b: b.pass_at_1_rate)
+                ],
+                width=bar_width,
+            )
+        )
+
+    return Group(*blocks)
 
 
 def render_markdown(result: RunResult, *, title: str = "StructBench leaderboard") -> str:

@@ -1,0 +1,175 @@
+name: Release
+
+# Publishing is driven by a tag, which makes the release reproducible: the artifact
+# is built from exactly the commit that is tagged, and the tag is what users pin to.
+#
+#   git tag -a v0.1.0 -m "StructBench v0.1.0"
+#   git push origin v0.1.0
+#
+# The workflow runs the full suite first (a release must not ship unverified code),
+# regenerates the SVG charts from a real run so the Release page carries current
+# numbers, builds sdist + wheel, and publishes via the `gh` CLI.
+#
+# `gh` is used instead of a third-party release action because it ships on the
+# runner, is first-party, and carries no Node-runtime deprecation risk -- the
+# popular release actions still target node20, which GitHub force-migrates and
+# reports as deprecated on every job.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (for re-running a failed release)."
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  PYTHONIOENCODING: utf-8
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  verify:
+    name: verify before release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - run: uv sync --extra dev
+      - name: Tests
+        run: uv run pytest -q
+      - name: Dataset integrity
+        run: uv run structbench validate --quiet
+      - name: Lint and format
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: READMEs in sync
+        run: uv run python scripts/check_readmes.py
+
+  charts:
+    name: regenerate charts
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - run: uv sync --extra dev
+      # The charts on the Release page must come from an actual run, so the
+      # published numbers cannot drift from the code that produced them.
+      - name: Run the offline suite
+        run: |
+          uv run structbench run \
+            -m mock:perfect,mock:good,mock:flaky,mock:weak,mock:escape_phobic,mock:typing_weak,mock:tool_butcher \
+            --concurrency 16 --quiet -o release-results \
+            --markdown release-results/leaderboard.md \
+            --charts release-results/charts
+      - name: Verify the harness is self-consistent
+        run: uv run python scripts/ci_gate.py release-results
+      - name: Stage release assets
+        run: |
+          mkdir -p release-assets
+          cp release-results/charts/*.svg release-assets/
+          cp release-results/leaderboard.md release-assets/
+          cp release-results/report.html release-assets/
+          cp release-results/run-*.json release-assets/
+          ls -la release-assets
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+
+  build:
+    name: build distributions
+    runs-on: ubuntu-latest
+    needs: verify
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Check the wheel actually installs and runs
+        run: |
+          uv venv /tmp/check
+          uv pip install --python /tmp/check dist/*.whl
+          # The bundled datasets must be importable from the installed package,
+          # not only from a source checkout -- that is the classic packaging bug.
+          /tmp/check/bin/structbench --version
+          /tmp/check/bin/structbench validate --quiet
+          /tmp/check/bin/structbench list | tail -3
+      - uses: actions/upload-artifact@v6
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [charts, build]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-assets
+          path: release-assets
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: distributions
+          path: dist
+
+      - name: Derive the tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compose the release notes
+        env:
+          TAG: ${{ steps.tag.outputs.name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          uv run --no-project python scripts/release_notes.py \
+            --tag "$TAG" --repository "$REPOSITORY" \
+            --assets release-assets --output body.md
+          echo "----- body.md -----"
+          cat body.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          # A tag containing a hyphen is a pre-release (v0.2.0-rc1).
+          prerelease=""
+          case "$TAG" in *-*) prerelease="--prerelease" ;; esac
+
+          gh release create "$TAG" \
+            --title "StructBench $TAG" \
+            --notes-file body.md \
+            $prerelease \
+            dist/* \
+            release-assets/*.svg \
+            release-assets/leaderboard.md \
+            release-assets/report.html \
+            release-assets/run-*.json
