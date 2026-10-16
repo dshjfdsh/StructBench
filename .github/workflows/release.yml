@@ -149,7 +149,10 @@ jobs:
           TAG: ${{ steps.tag.outputs.name }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          uv run --no-project python scripts/release_notes.py \
+          # Plain python3, not `uv run`: this job installs no toolchain, and
+          # release_notes.py imports only the standard library. `uv` is not on the
+          # runner by default -- referencing it here failed with exit 127.
+          python3 scripts/release_notes.py \
             --tag "$TAG" --repository "$REPOSITORY" \
             --assets release-assets --output body.md
           echo "----- body.md -----"
@@ -164,12 +167,24 @@ jobs:
           prerelease=""
           case "$TAG" in *-*) prerelease="--prerelease" ;; esac
 
-          gh release create "$TAG" \
-            --title "StructBench $TAG" \
-            --notes-file body.md \
-            $prerelease \
-            dist/* \
-            release-assets/*.svg \
-            release-assets/leaderboard.md \
-            release-assets/report.html \
+          assets=(
+            dist/*
+            release-assets/*.svg
+            release-assets/leaderboard.md
+            release-assets/report.html
             release-assets/run-*.json
+          )
+
+          # Re-running a failed release must be safe: if the Release already
+          # exists, upload into it rather than failing on "already exists".
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; uploading assets with --clobber"
+            gh release upload "$TAG" "${assets[@]}" --clobber
+            gh release edit "$TAG" --title "StructBench $TAG" --notes-file body.md $prerelease
+          else
+            gh release create "$TAG" \
+              --title "StructBench $TAG" \
+              --notes-file body.md \
+              $prerelease \
+              "${assets[@]}"
+          fi

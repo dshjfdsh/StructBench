@@ -269,6 +269,152 @@ class TestReleaseWorkflow:
         assert "uv pip install --python /tmp/check dist/*.whl" in workflow
         assert "/tmp/check/bin/structbench validate" in workflow
 
+    def test_release_can_be_re_run(self, workflow: str) -> None:
+        """Re-running a failed release must not die on "release already exists"."""
+        assert "gh release view" in workflow
+        assert "gh release upload" in workflow
+        assert "--clobber" in workflow
+
+
+class TestNoMissingTooling:
+    """Every tool a job invokes must be installed in *that* job.
+
+    This is the bug that broke the first release run:
+
+        uv: command not found
+        Error: Process completed with exit code 127
+
+    The `release` job ran `uv run python scripts/release_notes.py`, but `uv` is not
+    present on a GitHub runner unless `setup-uv` is used -- and that job had no
+    such step, because the script only needs the standard library. Asserting this
+    per job is the only way to catch it: the workflow is valid YAML, and nothing
+    else complains until the run fails.
+    """
+
+    @pytest.fixture(scope="class")
+    def workflow(self) -> str:
+        return (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    @staticmethod
+    def split_jobs(workflow: str) -> dict[str, str]:
+        """Split a workflow into ``job name -> job body``.
+
+        Jobs live at two-space indentation under ``jobs:``; a new job starts at the
+        next line matching that indentation.
+        """
+        body = workflow.split("\njobs:\n", 1)[1]
+        jobs: dict[str, str] = {}
+        current: str | None = None
+        for line in body.splitlines():
+            match = re.match(r"^  ([a-zA-Z0-9_-]+):\s*$", line)
+            if match:
+                current = match.group(1)
+                jobs[current] = ""
+            elif current:
+                jobs[current] += line + "\n"
+        return jobs
+
+    @staticmethod
+    def uv_invocations(body: str) -> list[str]:
+        """Lines that actually *run* uv, ignoring mentions inside comments.
+
+        A naive ``\\buv\\b`` search matches the explanatory comment in the release
+        job, so strip comments and look for uv in command position (start of line,
+        or after a shell operator).
+        """
+        found: list[str] = []
+        for raw in body.splitlines():
+            line = raw.strip()
+            if line.startswith("#"):
+                continue
+            # Drop trailing comments that are not inside quotes.
+            code = re.sub(r"\s+#.*$", "", line)
+            if re.search(r"(^|[|&;(]\s*|\brun:\s*)uv\b", code):
+                found.append(line)
+        return found
+
+    def test_workflow_splits_into_jobs(self, workflow: str) -> None:
+        jobs = self.split_jobs(workflow)
+        # If the splitter silently returned nothing, the checks below would pass
+        # vacuously -- so pin the expected job set.
+        assert set(jobs) == {"verify", "charts", "build", "release"}
+
+    def test_uv_is_only_used_where_it_is_installed(self, workflow: str) -> None:
+        for name, body in self.split_jobs(workflow).items():
+            invocations = self.uv_invocations(body)
+            if invocations:
+                assert "astral-sh/setup-uv" in body, (
+                    f"job {name!r} invokes uv ({invocations[0]!r}) but never installs "
+                    "it; the runner has no uv by default (exit 127)"
+                )
+
+    def test_the_guard_detects_a_missing_toolchain(self) -> None:
+        """Negative test: the check above must fail on the shape that broke CI."""
+        broken = (
+            "name: publish GitHub Release\n"
+            "    runs-on: ubuntu-latest\n"
+            "    steps:\n"
+            "      - run: |\n"
+            "          uv run --no-project python scripts/release_notes.py\n"
+        )
+        assert self.uv_invocations(broken), "the detector missed a real uv invocation"
+        assert "astral-sh/setup-uv" not in broken
+
+    def test_release_job_needs_no_toolchain(self, workflow: str) -> None:
+        """The publishing job must stay dependency-free.
+
+        It only composes Markdown and calls `gh` (preinstalled on the runner), so
+        it must not pull in uv or Python packages -- that keeps the last step of a
+        release simple and impossible to break with a dependency change.
+        """
+        body = self.split_jobs(workflow)["release"]
+        assert "astral-sh/setup-uv" not in body
+        assert not self.uv_invocations(body), "the release job must not invoke uv"
+        # Plain interpreter, and the script is stdlib-only (proved below).
+        assert "python3 scripts/release_notes.py" in body
+
+    def test_release_notes_script_is_stdlib_only(self) -> None:
+        """It runs on a bare runner, so it must import nothing external."""
+        import ast
+
+        source = (ROOT / "scripts" / "release_notes.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+
+        stdlib = {
+            "__future__",
+            "argparse",
+            "re",
+            "sys",
+            "pathlib",
+            "json",
+            "html",
+            "os",
+            "shutil",
+            "textwrap",
+            "typing",
+            "dataclasses",
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    root = alias.name.split(".")[0]
+                    assert root in stdlib, f"non-stdlib import: {alias.name}"
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                root = node.module.split(".")[0]
+                assert root in stdlib, f"non-stdlib import: {node.module}"
+
+    def test_gh_cli_is_available_on_the_runner(self) -> None:
+        """`gh` ships on GitHub-hosted runners; the release step depends on it.
+
+        Documented in the runner image manifest; asserted here so a future switch
+        to a slim/container runner is a deliberate decision rather than a surprise
+        127 at publish time.
+        """
+        body = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        assert "gh release" in body
+        assert "runs-on: ubuntu-latest" in body
+        assert "container:" not in body
+
 
 class TestCiWorkflowStillSane:
     @pytest.fixture(scope="class")
