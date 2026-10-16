@@ -83,14 +83,14 @@
 <text x="799.86" y="99.86" text-anchor="middle" font-size="11" font-weight="600" fill="#3d4756">86</text>
 <text x="799.86" y="381.0" text-anchor="middle" font-size="12" fill="#3d4756">mock/weak</text>
 <line x1="70.0" y1="363.0" x2="856.0" y2="363.0" stroke="#cbd5e1" stroke-width="1.2"/>
-<rect x="201.5" y="437.0" width="12" height="12" rx="3" fill="#f59e0b"/>
-<text x="219.5" y="446.0" font-size="12.5" fill="#3d4756">Markdown 包裹泄漏</text>
-<rect x="323.3" y="437.0" width="12" height="12" rx="3" fill="#dc2626"/>
-<text x="341.3" y="446.0" font-size="12.5" fill="#3d4756">语法残缺/转义错误</text>
-<rect x="418.7" y="437.0" width="12" height="12" rx="3" fill="#9333ea"/>
-<text x="436.7" y="446.0" font-size="12.5" fill="#3d4756">Schema 类型不匹配</text>
-<rect x="533.9" y="437.0" width="12" height="12" rx="3" fill="#be123c"/>
-<text x="551.9" y="446.0" font-size="12.5" fill="#3d4756">枚举/参数幻觉</text>
-<rect x="616.1" y="437.0" width="12" height="12" rx="3" fill="#16a34a"/>
-<text x="634.1" y="446.0" font-size="12.5" fill="#3d4756">合规通过</text>
+<rect x="122.6" y="437.0" width="12" height="12" rx="3" fill="#f59e0b"/>
+<text x="140.6" y="446.0" font-size="12.5" fill="#3d4756">Markdown 包裹泄漏</text>
+<rect x="272.2" y="437.0" width="12" height="12" rx="3" fill="#dc2626"/>
+<text x="290.2" y="446.0" font-size="12.5" fill="#3d4756">语法残缺/转义错误</text>
+<rect x="418.9" y="437.0" width="12" height="12" rx="3" fill="#9333ea"/>
+<text x="436.9" y="446.0" font-size="12.5" fill="#3d4756">Schema 类型不匹配</text>
+<rect x="567.8" y="437.0" width="12" height="12" rx="3" fill="#be123c"/>
+<text x="585.8" y="446.0" font-size="12.5" fill="#3d4756">枚举/参数幻觉</text>
+<rect x="689.4" y="437.0" width="12" height="12" rx="3" fill="#16a34a"/>
+<text x="707.4" y="446.0" font-size="12.5" fill="#3d4756">合规通过</text>
 </svg>

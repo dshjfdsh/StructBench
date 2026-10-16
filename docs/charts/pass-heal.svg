@@ -52,8 +52,8 @@
 <text x="822.50" y="159.76" text-anchor="middle" font-size="10.5" font-weight="600" fill="#3d4756">66.3%</text>
 <text x="799.86" y="381.0" text-anchor="middle" font-size="12" fill="#3d4756">mock/weak</text>
 <line x1="70.0" y1="363.0" x2="856.0" y2="363.0" stroke="#cbd5e1" stroke-width="1.2"/>
-<rect x="364.4" y="437.0" width="12" height="12" rx="3" fill="#2f6fed"/>
-<text x="382.4" y="446.0" font-size="12.5" fill="#3d4756">Pass@1</text>
-<rect x="440.0" y="437.0" width="12" height="12" rx="3" fill="#16a34a"/>
-<text x="458.0" y="446.0" font-size="12.5" fill="#3d4756">Heal@1</text>
+<rect x="371.2" y="437.0" width="12" height="12" rx="3" fill="#2f6fed"/>
+<text x="389.2" y="446.0" font-size="12.5" fill="#3d4756">Pass@1</text>
+<rect x="451.0" y="437.0" width="12" height="12" rx="3" fill="#16a34a"/>
+<text x="469.0" y="446.0" font-size="12.5" fill="#3d4756">Heal@1</text>
 </svg>

@@ -33,6 +33,7 @@ __all__ = [
     "ChartError",
     "Series",
     "grouped_bar_chart",
+    "legend_padding",
     "radar_chart",
     "stacked_bar_chart",
     "svg_header",
@@ -128,39 +129,115 @@ def svg_header(width: int, height: int, title: str, description: str = "") -> li
     return parts
 
 
+def _text_width(text: str, *, font_size: float = 12.5) -> float:
+    """Estimate the rendered width of ``text`` in pixels.
+
+    A CJK ideograph occupies roughly twice the advance width of a Latin character,
+    so measuring every character as ASCII understates a Chinese label by ~2x. That
+    is not cosmetic: the legend packs items onto rows by their estimated width, so
+    underestimating makes labels overlap -- which is exactly what happened to the
+    error-taxonomy legend, whose labels are Chinese.
+
+    This remains an estimate (we embed no font metrics), but it is deliberately
+    biased *upward*: a slightly-too-wide estimate wraps the legend onto an extra
+    row, while a too-narrow one produces unreadable overlapping text.
+    """
+    ascii_width = font_size * 0.53
+    wide_width = font_size * 1.0
+    total = 0.0
+    for char in text:
+        code = ord(char)
+        # CJK, Hangul, Kana, fullwidth forms and the CJK punctuation blocks all
+        # render at full em width. Zero-width characters must not count at all.
+        if code in (0x200B, 0x200C, 0x200D, 0xFEFF):
+            continue
+        if (
+            0x1100 <= code <= 0x115F
+            or 0x2E80 <= code <= 0xA4CF
+            or 0xAC00 <= code <= 0xD7A3
+            or 0xF900 <= code <= 0xFAFF
+            or 0xFE30 <= code <= 0xFE6F
+            or 0xFF00 <= code <= 0xFF60
+            or 0xFFE0 <= code <= 0xFFE6
+            or 0x1F300 <= code <= 0x1FAFF  # emoji
+            or 0x20000 <= code <= 0x3FFFD
+        ):
+            total += wide_width
+        else:
+            total += ascii_width
+    return total
+
+
+def _legend_metrics(series: Sequence[Series], width: float) -> tuple[list[float], list[list[int]]]:
+    """Return per-item widths and the wrapped row assignment.
+
+    Shared by the drawing code and the layout code: the layout needs the row count
+    *before* it can reserve enough bottom padding, and drawing needs the same
+    wrapping. Computing it in one place keeps the two from disagreeing.
+    """
+    swatch = 12
+    swatch_gap = 6
+    item_gap = 22
+    available = width - 32
+
+    widths = [swatch + swatch_gap + _text_width(item.name) + item_gap for item in series]
+
+    rows: list[list[int]] = [[]]
+    row_width = 0.0
+    for index, item_width in enumerate(widths):
+        # A single item wider than the canvas still gets its own row rather than
+        # being dropped.
+        if row_width + item_width > available and rows[-1]:
+            rows.append([])
+            row_width = 0.0
+        rows[-1].append(index)
+        row_width += item_width
+    return widths, rows
+
+
+def legend_padding(
+    series: Sequence[Series],
+    width: float,
+    *,
+    base: int = 76,
+    row_height: int = 20,
+) -> int:
+    """Bottom padding needed so the wrapped legend fits inside the canvas.
+
+    Without this the legend simply overflows: a fixed 96px reserve fits one row, and
+    a legend with long (e.g. Chinese) labels wraps to two or three.
+    """
+    if not series:
+        return base
+    _, rows = _legend_metrics(series, width)
+    return base + (len(rows) - 1) * row_height
+
+
 def _legend(
     series: Sequence[Series],
     layout: _Layout,
     *,
     y: float | None = None,
 ) -> list[str]:
-    """Draw a wrapped legend centred at the bottom of the chart."""
+    """Draw a wrapped legend centred at the bottom of the chart.
+
+    Items are packed onto rows by their *measured* width, so a legend of long
+    labels (Chinese ones, typically) wraps instead of overlapping.
+    """
     items = [(item.name, item.colour or PALETTE[i % len(PALETTE)]) for i, item in enumerate(series)]
     if not items:
         return []
 
-    # Approximate width: the legend only needs to avoid overlapping itself, and a
-    # rough per-character estimate is stable across fonts and platforms.
-    char_width = 6.6
     swatch = 12
-    gap = 18
-    widths = [swatch + 6 + len(name) * char_width + gap for name, _ in items]
-    available = layout.width - 32
-
-    rows: list[list[int]] = [[]]
-    row_width = 0.0
-    for index, width in enumerate(widths):
-        if row_width + width > available and rows[-1]:
-            rows.append([])
-            row_width = 0.0
-        rows[-1].append(index)
-        row_width += width
+    swatch_gap = 6
+    item_gap = 22
+    widths, rows = _legend_metrics(series, layout.width)
 
     base_y = y if y is not None else layout.height - 14 - (len(rows) - 1) * layout.legend_row_height
     out: list[str] = []
     for row_index, row in enumerate(rows):
-        row_total = sum(widths[i] for i in row)
-        x = (layout.width - row_total) / 2
+        row_total = sum(widths[i] for i in row) - item_gap  # no trailing gap
+        x = max(16.0, (layout.width - row_total) / 2)
         y_pos = base_y + row_index * layout.legend_row_height
         for i in row:
             name, colour = items[i]
@@ -169,8 +246,8 @@ def _legend(
                 f'rx="3" fill="{colour}"/>'
             )
             out.append(
-                f'<text x="{x + swatch + 6:.1f}" y="{y_pos + 1:.1f}" font-size="12.5" '
-                f'fill="#3d4756">{escape(name)}</text>'
+                f'<text x="{x + swatch + swatch_gap:.1f}" y="{y_pos + 1:.1f}" '
+                f'font-size="12.5" fill="#3d4756">{escape(name)}</text>'
             )
             x += widths[i]
     return out
@@ -228,7 +305,12 @@ def radar_chart(
     if not series:
         return _empty_chart(width, height, title or "Radar", "No models to compare")
 
-    layout = _Layout(width=width, height=height, pad_top=64, pad_bottom=96)
+    layout = _Layout(
+        width=width,
+        height=height,
+        pad_top=64,
+        pad_bottom=legend_padding(series, width, base=96),
+    )
     cx = width / 2
     cy = layout.plot_top + layout.plot_height / 2
     radius = min(layout.plot_width, layout.plot_height) / 2 - 34
@@ -353,7 +435,12 @@ def grouped_bar_chart(
     if top <= 0:
         raise ChartError("axis maximum must be positive")
 
-    layout = _Layout(width=width, height=height, pad_top=64, pad_bottom=96)
+    layout = _Layout(
+        width=width,
+        height=height,
+        pad_top=64,
+        pad_bottom=legend_padding(series, width, base=96),
+    )
     group_width = layout.plot_width / len(categories)
     bar_gap = 3.0
     # Leave a fifth of each group as breathing room between groups.
@@ -473,7 +560,12 @@ def stacked_bar_chart(
     totals = [sum(item.values[index] or 0.0 for item in series) for index in range(len(categories))]
     top = _nice_max(max(totals) if totals else 1.0)
 
-    layout = _Layout(width=width, height=height, pad_top=64, pad_bottom=96)
+    layout = _Layout(
+        width=width,
+        height=height,
+        pad_top=64,
+        pad_bottom=legend_padding(series, width, base=96),
+    )
     group_width = layout.plot_width / len(categories)
     bar_width = max(6.0, group_width * 0.52)
 

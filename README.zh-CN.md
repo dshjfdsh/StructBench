@@ -11,7 +11,7 @@
 [![CI](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml/badge.svg)](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-384%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-393%20passing-brightgreen.svg)](tests/)
 [![Cases](https://img.shields.io/badge/cases-86%20adversarial-orange.svg)](datasets/)
 [![Judge model](https://img.shields.io/badge/judge%20model-not%20required-success.svg)](#为什么不用-llm-当裁判)
 
@@ -359,7 +359,7 @@ structbench/
 │       ├── charts.py           # RunResult → 提交进仓库的图表集
 │       ├── html.py             # 单文件交互式报告的数据组装
 │       └── template.html       # ECharts 雷达图/错误分布/失败浏览器模板
-└── tests/                      # 384 项测试
+└── tests/                      # 393 项测试
 ```
 
 ---
@@ -368,7 +368,7 @@ structbench/
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 384 项测试
+pytest -q                       # 393 项测试
 ruff check . && ruff format --check .
 structbench validate            # 题库完整性
 ```

@@ -11,7 +11,7 @@
 [![CI](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml/badge.svg)](https://github.com/dshjfdsh/StructBench/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-384%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-393%20passing-brightgreen.svg)](tests/)
 [![Cases](https://img.shields.io/badge/cases-86%20adversarial-orange.svg)](datasets/)
 [![Judge model](https://img.shields.io/badge/judge%20model-not%20required-success.svg)](#why-no-llm-as-a-judge)
 
@@ -410,7 +410,7 @@ structbench/
 │       ├── charts.py           # RunResult → the committed chart set
 │       ├── html.py             # single-file interactive report payload
 │       └── template.html       # ECharts radar/taxonomy/failure-explorer template
-└── tests/                      # 384 tests
+└── tests/                      # 393 tests
 ```
 
 ---
@@ -419,7 +419,7 @@ structbench/
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                       # 384 tests
+pytest -q                       # 393 tests
 ruff check . && ruff format --check .
 structbench validate            # dataset integrity
 ```

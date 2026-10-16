@@ -392,6 +392,99 @@ class TestRunResultCharts:
 # --------------------------------------------------------------------------- #
 
 
+class TestLegendLayout:
+    """The legend packs items by estimated width, so the estimate must be honest.
+
+    The first published charts shipped with overlapping legend text: every label
+    was measured as if it were ASCII, but CJK ideographs are roughly twice as wide,
+    so the Chinese error-taxonomy labels were under-measured by ~25-45px each and
+    ran into one another.
+    """
+
+    def test_cjk_text_measures_wider_than_ascii(self) -> None:
+        from structbench.reporter.svg import _text_width
+
+        chinese = _text_width("合规通过")
+        ascii_same_length = _text_width("abcd")
+        assert chinese > ascii_same_length * 1.6, (
+            "CJK must be measured at roughly full-em width; measuring it as ASCII "
+            "is what caused the overlapping legend"
+        )
+
+    def test_zero_width_characters_are_not_counted(self) -> None:
+        from structbench.reporter.svg import _text_width
+
+        assert _text_width("ab\u200bcd") == pytest.approx(_text_width("abcd"))
+
+    def test_measured_width_scales_with_length(self) -> None:
+        from structbench.reporter.svg import _text_width
+
+        assert _text_width("abcd") > _text_width("ab")
+
+    def test_legend_items_never_overlap(self) -> None:
+        """Walk the drawn legend and assert consecutive items do not collide."""
+        from structbench.reporter.svg import _legend_metrics, _text_width
+
+        series = [
+            Series(name=name, values=[1.0])
+            for name in (
+                "Markdown 包裹泄漏",
+                "语法残缺/转义错误",
+                "Schema 类型不匹配",
+                "枚举/参数幻觉",
+                "合规通过",
+            )
+        ]
+        widths, rows = _legend_metrics(series, 880)
+        assert rows, "legend produced no rows"
+
+        for row in rows:
+            x = 0.0
+            for index in row:
+                text_width = _text_width(series[index].name)
+                # The block's width must cover the swatch plus the text.
+                assert widths[index] >= text_width, "measured block is narrower than its text"
+                x += widths[index]
+                if index != row[-1]:
+                    assert x >= widths[index] - 1, "legend blocks overlap"
+
+    def test_wide_labels_wrap_instead_of_overflowing(self) -> None:
+        from structbench.reporter.svg import _legend_metrics
+
+        series = [Series(name=f"非常长的中文标签名称{i}", values=[1.0]) for i in range(8)]
+        _widths, rows = _legend_metrics(series, 600)
+        # Eight long CJK labels cannot fit on one 600px row.
+        assert len(rows) > 1, "long labels must wrap rather than overflow the canvas"
+
+    def test_legend_padding_grows_with_rows(self) -> None:
+        from structbench.reporter.svg import legend_padding
+
+        short = [Series(name="a", values=[1.0]), Series(name="b", values=[1.0])]
+        long = [Series(name=f"非常长的中文标签名称{i}", values=[1.0]) for i in range(8)]
+        assert legend_padding(long, 600) > legend_padding(short, 600)
+
+    def test_legend_stays_inside_the_canvas(self) -> None:
+        """Every legend text element must be drawn within the SVG bounds."""
+        from structbench.reporter.svg import _text_width
+
+        series = [Series(name=f"很长的中文图例项{i}", values=[1.0]) for i in range(6)]
+        svg = stacked_bar_chart(["m1"], series, width=600, height=420, title="legend bounds")
+
+        root = ET.fromstring(svg)
+        height = float(root.get("height"))
+        checked = 0
+        for text in root.iter(f"{SVG_NS}text"):
+            y = float(text.get("y") or 0)
+            x = float(text.get("x") or 0)
+            assert 0 <= y <= height, f"text at y={y} escapes the {height}px canvas"
+            assert x >= 0, f"text at x={x} is off the left edge"
+            if text.text and text.text.startswith("很长"):
+                checked += 1
+                # A label must still fit horizontally.
+                assert x + _text_width(text.text) <= 600 + 1, "legend label overflows"
+        assert checked >= 3, "expected the legend labels to be present"
+
+
 class TestRasteriser:
     def test_rejects_malformed_svg(self) -> None:
         # Raw string: this is a regex alternation, and RUF043 wants that explicit.

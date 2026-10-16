@@ -126,9 +126,39 @@ class TestReleaseBody:
             changelog_path=ROOT / "CHANGELOG.md",
         )
         assert "pip install structbench" in body
-        assert "owner/repo/releases/download/v0.1.0/pass-heal.svg" in body
         assert "## Leaderboard" in body
         assert "## What changed" in body
+
+    def test_charts_link_to_raw_not_to_release_assets(self, workdir: Path) -> None:
+        """Release assets cannot be rendered inline, so they must not be linked.
+
+        GitHub serves Release assets with ``Content-Type: application/octet-stream``
+        and ``Content-Disposition: attachment``, so an image pointing at
+        ``/releases/download/...`` shows as a broken image in a Release body. The
+        first published release had exactly this bug. Charts must come from
+        ``raw.githubusercontent.com``, which serves ``image/svg+xml``.
+        """
+        assets = self.make_assets(workdir / "assets")
+        body = notes.build_body(tag="v0.1.0", repository="owner/repo", assets=assets)
+
+        for name, heading in notes.CHARTS:
+            expected = f"https://raw.githubusercontent.com/owner/repo/v0.1.0/docs/charts/{name}"
+            assert f"![{heading}]({expected})" in body, f"{name} is not linked from raw"
+
+        # No image may point at a release asset URL.
+        image_urls = re.findall(r"!\[[^\]]*\]\(([^)]+)\)", body)
+        assert image_urls, "no images found; the assertion below would be vacuous"
+        for url in image_urls:
+            assert "/releases/download/" not in url, (
+                f"image links to a release asset, which renders as a broken image: {url}"
+            )
+
+    def test_chart_links_use_the_release_tag(self, workdir: Path) -> None:
+        """A Release page must show the charts that were current for its tag."""
+        assets = self.make_assets(workdir / "assets")
+        body = notes.build_body(tag="v9.9.9", repository="owner/repo", assets=assets)
+        assert "/v9.9.9/docs/charts/" in body
+        assert "/v0.1.0/" not in body
 
     def test_body_includes_the_matching_changelog_section(self, workdir: Path) -> None:
         assets = self.make_assets(workdir / "assets")
